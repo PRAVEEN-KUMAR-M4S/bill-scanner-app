@@ -1,0 +1,538 @@
+# BillScan AI — Interview Notes
+
+A revision companion to [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md). Use it the night
+before: pitches, trade-offs, likely questions, snippets to know cold, and the
+debugging stories that make the project sound like work rather than a tutorial.
+
+---
+
+## 1. The 30-second pitch
+
+> "BillScan AI is a Flutter expense app: you sign in, photograph a bill, check
+> the extracted fields, and save it. I built it feature-first with clean
+> architecture — domain, data and presentation per feature — one BLoC per
+> feature with sealed events and states, and repository contracts so the
+> in-memory backend can be swapped for a real one without touching the UI. The
+> five post-login screens are implemented from design exports, with a token-based
+> design system, shared paper components, and layouts verified from 320-pixel
+> phones up to tablets. It has twelve widget tests covering auth, navigation,
+> search, the full scan-to-save flow and multi-viewport layout, and the analyzer
+> is clean."
+
+---
+
+## 2. The two-minute walkthrough
+
+1. **Auth** — `WelcomePage` offers guest, sign-in and registration. Forms use
+   `Form` + validators; `AuthBloc` emits loading/authenticated/error, and a single
+   listener in `app.dart` moves the stack to the shell or shows a snack bar.
+2. **Shell** — Home and Bills live in an `IndexedStack` behind a custom bottom
+   bar. A single app-level `BillsBloc` feeds both so they never disagree.
+3. **Dashboard** — derived month totals and a seven-day strip from
+   `BillSummary.fromBills`, an "Add a bill" shortcut, recent bills.
+4. **Bills** — search across merchant/category/items and category chips, all
+   handled in the bloc; the full list is kept separately so the dashboard total
+   is not filtered.
+5. **Scan** — Add-a-bill offers capture, library, manual entry and a sample.
+   The camera screen uses a custom-painted frame and a cream sheet; allowing the
+   camera emits `ScanScanning`, then `ScanCaptured`.
+6. **Review** — a stateful form: raw strings in the state, derived validation
+   (`merchantValid`, `dateValid`, `totalValid`, item rules), add/remove items,
+   totals, and save. On success `ReviewSaved` triggers a bills reload, a snack
+   bar and a pop to the shell.
+7. **Quality** — 13 shared design-system widgets, design tokens instead of
+   hardcoded values, responsive patterns, 12 widget tests at three viewports,
+   zero analyzer issues.
+
+---
+
+## 3. Architecture on a whiteboard
+
+Draw two boxes on the outside and one in the middle:
+
+```
+┌──────────────────────┐        ┌──────────────────────┐
+│     presentation     │        │        data          │
+│ pages · widgets      │        │ repository impls     │
+│ blocs · events       │        │ sample data          │
+│ states               │        │ latency              │
+└──────────┬───────────┘        └──────────┬───────────┘
+           │ depends on                     │ implements
+           ▼                                ▼
+        ┌──────────────────────────────────────────┐
+        │                 domain                   │
+        │ entities · repository interfaces         │
+        │ use cases · failures                     │
+        └──────────────────────────────────────────┘
+```
+
+Say: *"The arrows point inwards; domain has no Flutter or storage knowledge.
+Data implements what domain declares, presentation calls use cases, and a single
+composition root wires it. That gives me swappable edges and fast tests."*
+
+Then draw the request path:
+
+```
+tap → event → bloc → use case → repository (interface)
+                    ← result
+     state ← emit ←
+     page rebuilds
+```
+
+---
+
+## 4. Trade-offs I made (and would defend)
+
+| Decision | Why | Cost / when to revisit |
+|---|---|---|
+| BLoC over `setState`/Provider | Explicit events, immutable states, easy async/loading/error handling, testable | More files than `setState`; fine for a growing app |
+| Sealed events and states | Exhaustive switches and readable transitions | Boilerplate per event; codegen helps at scale |
+| Thin use cases | Keep blocs free of repository APIs; rule/analytics seam | Ceremony now; pays off with backend rules |
+| Repository interfaces | UI/test substitute without mocking widgets | One extra contract per feature |
+| Hand-written `copyWith`/`props` | No build step; small states | Use freezed when states multiply |
+| `AppDependencies` instead of `get_it` | One obvious composition root, easy constructor injection | Manual wiring grows; move to get_it when the graph does |
+| One BillsBloc for two screens | No sync logic; one source of truth | Holds both all/filtered lists; acceptable at this size |
+| `IndexedStack` for tabs | Keeps scroll/state per tab | Both pages stay in the tree; tests must scope finders |
+| Raw strings in review state | Partial input (`1.`, empty) does not fight the user | Parse/validate in getters; use domain values on submit |
+| Demo chart from real data | Honest product behaviour | Does not replicate the export's decorative tall bar |
+| In-memory repositories | No backend/keys needed to demo; realistic latency | Data resets on restart; swap in data layer only |
+
+---
+
+## 5. Likely questions and answers
+
+### Clean architecture
+
+**Q: What is clean architecture in one sentence?**
+> "Separating what the app knows (domain) from how it stores things (data) and
+> how it presents them (presentation), with dependencies pointing inward."
+
+**Q: Where does this project apply it?**
+> Every feature is split into `domain`, `data` and `presentation`. For example
+> bills: `Bill`/`BillItem`/`BillRepository`/`FetchBills` are domain;
+> `InMemoryBillRepository` is data; `BillsBloc`, pages and `BillTile` are
+> presentation. Domain imports no Flutter code.
+
+**Q: Why use cases if they only call the repository?**
+> They give the bloc a stable API that isn't tied to data methods, and they're
+> where rules will go — e.g. "a bill must have at least one item", dedupe, or
+> analytics. They also make the bloc testable with a one-method fake instead of a
+> multi-method repository.
+
+**Q: Why feature-first folders?**
+> A feature is the unit of change. Everything about bills is under
+> `features/bills`, so a new developer can find it, and deleting a feature is
+> deleting a folder. Layer-first (`models/`, `services/`) spreads one feature
+> across the tree.
+
+**Q: Does every feature need all three folders?**
+> No. `home` and `review` have no data/domain because they reuse bills' domain
+> and the shared bloc. Empty folders would be cargo cult.
+
+### BLoC and state
+
+**Q: Why BLoC instead of Provider/Riverpod/setState?**
+> The app has async transitions (auth, fetch, scan, save) and several screens
+> sharing state. BLoC's event→state model makes those transitions explicit and
+> testable, and it separates business state from widgets. `setState` would leak
+> logic into pages; Provider is fine for small apps but doesn't give the same
+> event trace. Riverpod would work; BLoC is already established here.
+
+**Q: Why separate events from states?**
+> An event is an intention (`ReviewSubmitted`), a state is a snapshot
+> (`ReviewEditing(isSaving: true)`). Keeping them apart makes the transition
+> graph obvious and lets the UI dispatch intent without knowing the rules.
+
+**Q: Why sealed classes?**
+> They are a closed union. `switch` over `AuthState` is exhaustive, so adding a
+> state forces every handler to be updated at compile time. No `else` fallbacks.
+
+**Q: What is Equatable for?**
+> Value equality. BLoC compares the new state to the old one and skips rebuilds
+> when equal; `BlocConsumer.listenWhen` compares previous/current. Without it,
+> two `BillsLoaded` objects with the same data would be different by identity.
+
+**Q: How do you handle loading and errors?**
+> Loading is emitted before the await; errors are states (or a `failureMessage`
+> field) after catching typed failures. Auth errors surface via one app-level
+> listener; review errors stay on the review page. Repository exceptions never
+> reach widgets.
+
+**Q: Why is AuthBloc app-level but ReviewBloc route-level?**
+> Auth identity is needed everywhere and lasts the session; a review draft is
+> meaningless after leaving the screen. Scan is the same: the camera session dies
+> with its route. Blocs are closed automatically when their provider is disposed;
+> the app-level ones are closed in `BillScannerApp.dispose`.
+
+**Q: How do you prevent double submits?**
+> The event handler returns early when `isSaving`, and the button is disabled
+> while loading. The camera bloc also returns early if it is already scanning.
+
+### Data and DI
+
+**Q: How does saving a bill update the dashboard?**
+> `ReviewSaved` triggers `BillsReloaded` on the shared app-level BillsBloc, which
+> refetches from the same repository instance and emits an updated list. The
+> dashboard and list both rebuild. No manual copying between screens.
+
+**Q: How would you add a real backend?**
+> Implement `BillRepository`/`AuthRepository`/`ScanRepository` with HTTP/OCR and
+> change the defaults in `AppDependencies`. Pages and blocs are untouched. For
+> offline support, wrap the remote repository in a caching repository that
+> implements the same interface.
+
+**Q: How would you add persistence?**
+> A `LocalBillRepository` (or a decorator that writes through to
+> SharedPreferences/Isar/Drift) behind the same interface; inject it in
+> `AppDependencies`.
+
+**Q: Why keep the sample bill in two repositories?**
+> It does not: `buildSampleBill(now)` in `features/bills/data` is the single
+> source used by the seed and by the simulated scanner. That avoids drift between
+> the dashboard's demo row and the sample review.
+
+**Q: Why is `isSample` on the entity?**
+> The review banner needs to know where the values came from. A dedicated draft
+> type or a review parameter would also work; the flag is the simplest option
+> for a demo. In a production model I would separate "draft source" from the
+> persisted bill.
+
+**Q: No JSON/serialization?**
+> Nothing crosses a network boundary yet. When it does, add `fromJson`/`toJson`
+> (or json_serializable) in the data layer so the domain entities stay free of
+> transport concerns.
+
+### UI, design and responsiveness
+
+**Q: How is the design system structured?**
+> Tokens (`AppColors`, `AppSpacing`, `AppRadius`, `AppStroke`, `AppShadows`,
+> `AppLayout`, `AppFonts`) plus 13 shared components. Pages never hardcode a
+> colour or a font; they compose widgets.
+
+**Q: When do you promote a widget to `core/widgets`?**
+> When a second screen needs the same markup. This pass promoted `PageScaffold`,
+> `ScreenHeader`, `SectionHeading`, `ActionTile` and `PaperChip`; feature-only
+> widgets like `BillTile`, `CaptureFrame` and `AuthPageScaffold` stay in their
+> features.
+
+**Q: How did you make it responsive?**
+> Scrollable pages, a 560-px content cap with growing gutters, `Expanded`/
+> `Flexible` text, wrapping and horizontally scrolling chips, breakpoint-aware
+> date/total and item rows, a height-capped camera sheet with responsive
+> controls, an aspect-ratio capture frame, `FittedBox` for money, and safe-area
+> padding. Verified with tests at 320×568, 390×844 and 800×1000 plus live
+> browser checks.
+
+**Q: How do you stop long text from overflowing?**
+> Buttons and the camera hint use `Flexible` with ellipsis; copy wraps inside
+> `Expanded`; chips scroll or wrap; the amount uses `FittedBox(scaleDown)`;
+> pages scroll instead of clipping.
+
+**Q: The design is 412 wide. What happens at 320?**
+> Review stacks date/total and item fields, the camera controls shrink, the
+> sheet scrolls, the dashboard scrolls (Add-a-bill wraps), and the welcome page
+> scrolls. No overflow; the tests assert no layout exceptions.
+
+**Q: How would you support dark mode / text scaling / RTL?**
+> Dark mode: add a second token set and pass a theme; components already read
+> tokens, so most pages need no changes. Text scaling: test at 2.0, prefer
+> wrapping over fixed heights. RTL: Flutter's directional widgets handle most of
+> it; check icons (arrows) and mirrored layouts.
+
+### Testing
+
+**Q: What is your testing strategy?**
+> Widget tests through the real UI with real blocs and instant in-memory
+> repositories. They cover the user paths: auth validation and success, guest
+> entry, tab switching, search/filtering, the scan state progression, review
+> validation, adding items, saving and the dashboard reload, sign-out,
+> duplicate-email errors, and no-overflow at three viewport sizes.
+
+**Q: How do you test an async scanning state?**
+> The scan repository takes 120 ms in tests; tap "Allow camera", `pump(16ms)` to
+> assert "Reading your bill…" and `02 / 02`, then `pumpAndSettle()` to reach
+> review. The latency is injectable, so the test is deterministic.
+
+**Q: Why do finders need scoping?**
+> The shell's `IndexedStack` keeps Home and Bills in the tree. `find.text` would
+> match both, so helpers scope to `HomePage`/`BillsPage` or the bottom nav. This
+> is a real consequence of preserving tab state.
+
+**Q: What isn't tested?**
+> Pure bloc unit tests, goldens, integration tests on a device, and the real
+> camera/OCR/backend. I'd add `bloc_test` for the state matrices, golden tests
+> for the paper components, and an integration test for a real capture.
+
+**Q: Why disable Google Fonts in tests?**
+> Tests must not depend on the network; disabling runtime fetching keeps them
+> deterministic. In production the fonts are fetched/cached at runtime.
+
+### Performance and quality
+
+**Q: Any performance concerns?**
+> Filtering and summary computation are O(n) over a small list. Builds are
+> scoped with `BlocBuilder`/`context.select`; static widgets are `const`;
+> `IndexedStack` avoids rebuilding tabs on switch. For large data I'd move
+> filtering server-side or memoise the summary.
+
+**Q: Accessibility?**
+> Icon-only controls have semantic labels, tappable rows are buttons, and the
+> nav reports selected state. Known gaps: some text-bearing controls repeat
+> their label ("Bills Bills") because an explicit label wraps visible text, and
+> the accent-on-cream active tab is low contrast. The fixes are
+> `excludeSemantics` and a stronger active tint.
+
+**Q: Security?**
+> There is no real auth token or backend yet. Passwords are only used to
+> simulate length validation and are not stored. A real build needs HTTPS,
+> secure storage for tokens, no credential logging, and session expiry.
+
+---
+
+## 6. Snippets to know cold
+
+### 6.1 Auth: one async path for every request
+
+```dart
+Future<void> _run(
+  Emitter<AuthState> emit,
+  Future<AppUser> Function() request,
+) async {
+  emit(const AuthLoading());
+  try {
+    emit(AuthAuthenticated(await request()));
+  } on AuthFailure catch (failure) {
+    emit(AuthError(failure.message));
+  }
+}
+```
+
+Why it matters: loading is emitted first; all four entry points share it; only
+recoverable `AuthFailure`s become user messages, so unexpected errors are not
+masked as user errors.
+
+### 6.2 Bills: filtering in the bloc
+
+```dart
+List<Bill> _bills = const [];
+String _query = '';
+BillCategory? _category;
+
+BillsLoaded _loaded() => BillsLoaded(
+  bills: List.unmodifiable(_bills),
+  visibleBills: List.unmodifiable(_bills.where(_matches).toList()),
+  query: _query,
+  category: _category,
+);
+
+bool _matches(Bill bill) {
+  if (_category != null && bill.category != _category) return false;
+  final needle = _query.trim().toLowerCase();
+  if (needle.isEmpty) return true;
+  return bill.merchant.toLowerCase().contains(needle) ||
+      bill.category.label.toLowerCase().contains(needle) ||
+      bill.items.any((i) => i.name.toLowerCase().contains(needle));
+}
+```
+
+Talking point: the full list is preserved for the month summary; the filtered
+list is a separate immutable snapshot, so the UI never filters.
+
+### 6.3 Review: validate, then save
+
+```dart
+Future<void> _onSubmitted(ReviewSubmitted event, Emitter<ReviewState> emit) async {
+  final editing = _editing;
+  if (editing == null || editing.isSaving) return;
+
+  if (!editing.isValid) {
+    emit(editing.copyWith(submitted: true));
+    return;
+  }
+
+  emit(editing.copyWith(isSaving: true, submitted: true, clearFailure: true));
+  try {
+    emit(ReviewSaved(await _saveBill(editing.toBill())));
+  } on Exception {
+    emit(editing.copyWith(
+      isSaving: false,
+      failureMessage: 'Could not save that bill. Try again.',
+    ));
+  }
+}
+```
+
+Talking points: validation never throws; `submitted` reveals inline errors;
+`clearFailure` prevents stale error messages; `ReviewSaved` is a one-shot state
+the page reacts to once.
+
+### 6.4 Composition root
+
+```dart
+final deps = AppDependencies(); // real repositories
+runApp(BillScannerApp(dependencies: deps));
+
+// tests:
+AppDependencies(
+  authRepository: InMemoryAuthRepository(latency: Duration.zero),
+  billRepository: InMemoryBillRepository(latency: Duration.zero),
+  scanRepository: SimulatedScanRepository(latency: const Duration(milliseconds: 120)),
+)
+```
+
+Talking point: the exact same app graph in tests, only latencies differ; no
+global singleton to reset.
+
+### 6.5 Route-scoped blocs with arguments
+
+```dart
+case ReviewPage.routeName:
+  final bill = settings.arguments! as Bill;
+  return MaterialPageRoute<void>(
+    settings: settings,
+    builder: (_) => BlocProvider<ReviewBloc>(
+      create: (_) => widget.dependencies.createReviewBloc(bill: bill),
+      child: const ReviewPage(),
+    ),
+  );
+```
+
+Talking point: `BlocProvider(create:)` owns the bloc, so it is disposed with the
+route; the page itself has no constructor dependencies.
+
+### 6.6 The responsive frame
+
+```dart
+SingleChildScrollView(
+  padding: EdgeInsets.fromLTRB(gutter, 24, gutter, 32),
+  child: Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: children),
+    ),
+  ),
+)
+```
+
+Talking point: one widget gives every page scroll safety, a readable measure and
+responsive gutters.
+
+---
+
+## 7. Feature scripts (90 seconds each)
+
+### Scan flow
+
+> "Add-a-bill has four entry points: camera, library, manual and a sample. The
+> camera route creates a route-scoped ScanBloc. Its idle state is the permission
+> sheet; allowing the camera emits Scanning, the simulated OCR returns a Bill,
+> and ScanCaptured pushes the review route with that bill. If the scan fails, the
+> page shows a snack bar and resets. The frame is a CustomPainter — thin outline,
+> mid guide, four accent brackets — and the sheet is height-capped and scrolls on
+> small phones."
+
+### Review state
+
+> "ReviewBloc starts from a Bill and builds a ReviewEditing state that stores
+> merchant/date/total as strings plus a list of item inputs. Validation is
+> derived, not stored: parse the ISO date, parse the total, trim the merchant,
+> check each item. The header shows how many of the three headline fields are
+> ready. Submit reveals errors if invalid; otherwise it emits saving, calls the
+> SaveBill use case, and on success emits ReviewSaved. The page then reloads the
+> bills bloc, shows a snack bar, and pops to the shell, where the new bill is
+> already visible."
+
+### Sign-out bug story
+
+> "Sign-out originally used pushNamedAndRemoveUntil with a predicate that
+> removed every route. After sign-out, popUntil(isFirst) had no Welcome route to
+> return to, so the user was stranded. I changed the auth transition to keep the
+> Welcome route as the root via ModalRoute.withName, and added a test that signs
+> in, signs out and registers again."
+
+---
+
+## 8. Debugging stories to have ready
+
+1. **Sign-out stranded the user.** Root cause: the navigation predicate removed
+   all routes. Fix: keep Welcome as root, remove only the auth stack. Test added.
+2. **Welcome overflowed at 320×568.** Root cause: a fixed `Column` with
+   `Spacer`s could not scroll. Fix: `LayoutBuilder` + `SingleChildScrollView` +
+   min-height `ConstrainedBox` + `Center`, capped at 420 px.
+3. **Rows overflowed under narrow constraints.** Root cause: unconstrained text
+   in `Row`s (camera hint, manual link, privacy note). Fix: `Flexible` +
+   wrapping/ellipsis, verified with a 320-px widget test.
+4. **Date/total row stacked on a 390 phone.** Root cause: breakpoint compared
+   the card's inner width to 320. Fix: lower to 300 so 390 keeps the designed
+   two-column row while 320 still stacks.
+5. **Widget tests inflated text widths.** In the test environment the real fonts
+   are not available, so glyph widths differ and exposed latent overflow risks.
+   Kept the `Flexible` fixes (better for accessibility too) rather than
+   weakening assertions.
+6. **Tests tapped off-screen chips after horizontal scrolling.** Fix:
+   `ensureVisible` before tapping and unmounting the app between viewport
+   iterations so the navigator stack resets.
+
+---
+
+## 9. Numbers to remember
+
+| Thing | Value |
+|---|---|
+| Post-login screens | 5 |
+| Auth screens | 3 |
+| Features | 5 (`auth`, `bills`, `home`, `scan`, `review`) |
+| Dart files in `lib` | 71 |
+| Lines in `lib` | ≈ 6,264 |
+| Shared widgets | 13 |
+| Widget tests | 12 (all passing) |
+| Analyzer issues | 0 |
+| Design tokens | 12 colours, 6 spacings, 5 radii, 3 strokes, 2 shadows |
+| Responsive widths verified | 320×568, 390×844, 800×1000 |
+| Simulated latencies | auth 700 ms, bills 350 ms, scan 1200 ms |
+
+---
+
+## 10. What I would improve next (priority order)
+
+1. **Real persistence and backend** — implement repository interfaces, add
+   caching; no UI changes.
+2. **Real camera + OCR** — `camera` + ML Kit/hosted OCR, permission handling,
+   failure/retry UX.
+3. **Bloc unit tests** with `bloc_test` for the full validation/filtering
+   matrices.
+4. **Accessibility pass** — fix duplicate semantics labels, raise active-tab
+   contrast, test text scaling at 2.0.
+5. **Design polish** — measurement against the 412-px exports, tablet
+   two-column layouts, exact chart presentation with a demo clock.
+6. **Localisation** — `intl`, currency/locale, extracted strings.
+7. **CI** — `flutter analyze`, `flutter test`, format check on every push.
+
+---
+
+## 11. Questions to ask the interviewer
+
+- How do you decide between BLoC, Riverpod and plain `ChangeNotifier` on your
+  team?
+- Do you use code generation (freezed/json_serializable/build_runner) or
+  handwritten models?
+- How do you test screens that depend on a device camera or permissions?
+- What does your CI run for Flutter, and how do you handle golden tests across
+  platforms?
+- How do you manage design tokens — Figma variables, a theme package, or code?
+- What is the team's approach to accessibility and large text scaling?
+
+---
+
+## 12. Ten-minute revision checklist
+
+- [ ] Draw the three layers and the event→bloc→use case→repository path.
+- [ ] Say the 30-second pitch out loud.
+- [ ] Explain why BillsBloc lives above both tabs.
+- [ ] Explain the review validation getters and one-shot `ReviewSaved`.
+- [ ] Explain how a save reaches the dashboard (`BillsReloaded` + shared repo).
+- [ ] Name three responsive techniques and the widths you verified.
+- [ ] Name the five promoted shared widgets and why.
+- [ ] Tell the sign-out navigation bug story.
+- [ ] State what is simulated and what you would build next.
+- [ ] Ask two questions about the team's Flutter practice.
