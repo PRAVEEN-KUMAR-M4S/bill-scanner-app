@@ -10,9 +10,12 @@ import 'features/auth/presentation/pages/register_page.dart';
 import 'features/auth/presentation/pages/sign_in_page.dart';
 import 'features/auth/presentation/pages/welcome_page.dart';
 import 'features/bills/domain/entities/bill.dart';
+import 'features/bills/domain/entities/bill_extraction.dart';
+import 'features/bills/domain/entities/bill_problem.dart';
 import 'features/bills/presentation/bloc/bills_bloc.dart';
 import 'features/review/presentation/bloc/review_bloc.dart';
 import 'features/review/presentation/pages/review_page.dart';
+import 'features/scan/domain/entities/scan_source.dart';
 import 'features/scan/presentation/bloc/scan_bloc.dart';
 import 'features/scan/presentation/pages/add_bill_page.dart';
 import 'features/scan/presentation/pages/scan_page.dart';
@@ -56,6 +59,11 @@ class _BillScannerAppState extends State<BillScannerApp> {
           SnackBar(content: Text(message)),
         );
       case AuthInitial():
+        // Sign-out: drop the signed-in stack and return to the landing page.
+        _navigatorKey.currentState?.pushNamedAndRemoveUntil(
+          WelcomePage.routeName,
+          (Route<dynamic> route) => false,
+        );
       case AuthLoading():
         break;
     }
@@ -66,24 +74,37 @@ class _BillScannerAppState extends State<BillScannerApp> {
       case AddBillPage.routeName:
         return MaterialPageRoute<void>(
           settings: settings,
-          builder: (_) => AddBillPage(
-            sampleBill: widget.dependencies.sampleBill,
-          ),
+          builder: (_) =>
+              AddBillPage(sampleBill: widget.dependencies.sampleBill),
         );
       case ScanPage.routeName:
+        final ScanSource source = settings.arguments is ScanSource
+            ? settings.arguments! as ScanSource
+            : ScanSource.camera;
         return MaterialPageRoute<void>(
           settings: settings,
           builder: (_) => BlocProvider<ScanBloc>(
             create: (_) => widget.dependencies.createScanBloc(),
-            child: const ScanPage(),
+            child: ScanPage(source: source),
           ),
         );
       case ReviewPage.routeName:
-        final Bill bill = settings.arguments! as Bill;
+        final Object argument = settings.arguments!;
+        final Bill bill = switch (argument) {
+          final BillExtraction report => report.bill,
+          final Bill value => value,
+          _ => throw ArgumentError.value(argument, 'arguments'),
+        };
+        final List<BillProblem> problems = argument is BillExtraction
+            ? argument.problems
+            : const <BillProblem>[];
         return MaterialPageRoute<void>(
           settings: settings,
           builder: (_) => BlocProvider<ReviewBloc>(
-            create: (_) => widget.dependencies.createReviewBloc(bill: bill),
+            create: (_) => widget.dependencies.createReviewBloc(
+              bill: bill,
+              problems: problems,
+            ),
             child: const ReviewPage(),
           ),
         );
@@ -106,7 +127,9 @@ class _BillScannerAppState extends State<BillScannerApp> {
           navigatorKey: _navigatorKey,
           scaffoldMessengerKey: _messengerKey,
           theme: AppTheme.light(),
-          initialRoute: WelcomePage.routeName,
+          initialRoute: widget.dependencies.hasRestoredSession
+              ? AppShell.routeName
+              : WelcomePage.routeName,
           routes: <String, WidgetBuilder>{
             WelcomePage.routeName: (_) => const WelcomePage(),
             SignInPage.routeName: (_) => const SignInPage(),

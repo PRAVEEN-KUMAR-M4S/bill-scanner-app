@@ -38,7 +38,9 @@ class InMemoryAuthRepository implements AuthRepository {
     await Future<void>.delayed(latency);
     _ensurePasswordIsStrong(password);
     if (!_registeredEmails.add(email.trim().toLowerCase())) {
-      throw const AuthFailure('That email is already registered. Try signing in.');
+      throw const AuthFailure(
+        'That email is already registered. Try signing in.',
+      );
     }
     return AppUser(
       id: email.trim().toLowerCase(),
@@ -61,6 +63,17 @@ class InMemoryAuthRepository implements AuthRepository {
   Future<AppUser> continueAsGuest() async {
     await Future<void>.delayed(latency);
     return const AppUser(id: 'guest', name: 'Guest', email: '', isGuest: true);
+  }
+
+  @override
+  Future<AppUser?> restoreSession() async {
+    // The in-memory fake starts signed out; it exists for tests and previews.
+    return null;
+  }
+
+  @override
+  Future<void> signOut() async {
+    await Future<void>.delayed(latency);
   }
 
   void _ensurePasswordIsStrong(String password) {

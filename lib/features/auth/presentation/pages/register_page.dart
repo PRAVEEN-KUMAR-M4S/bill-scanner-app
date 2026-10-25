@@ -46,12 +46,12 @@ class _RegisterPageState extends State<RegisterPage> {
     if (!_agreed) setState(() => _showAgreementError = true);
     if (!formIsValid || !_agreed) return;
     context.read<AuthBloc>().add(
-          AuthRegisterRequested(
-            name: _name.text.trim(),
-            email: _email.text.trim(),
-            password: _password.text,
-          ),
-        );
+      AuthRegisterRequested(
+        name: _name.text.trim(),
+        email: _email.text.trim(),
+        password: _password.text,
+      ),
+    );
   }
 
   @override
@@ -84,8 +84,10 @@ class _RegisterPageState extends State<RegisterPage> {
                   controller: _name,
                   textInputAction: TextInputAction.next,
                   autofillHints: const <String>[AutofillHints.name],
-                  validator: (String? value) =>
-                      FormValidators.required(value, message: 'Name is required'),
+                  validator: (String? value) => FormValidators.required(
+                    value,
+                    message: 'Name is required',
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 PaperTextField(
@@ -117,7 +119,10 @@ class _RegisterPageState extends State<RegisterPage> {
                   }),
                   child: RichText(
                     text: TextSpan(
-                      style: AppFonts.display(size: 13, color: AppColors.inkMuted),
+                      style: AppFonts.display(
+                        size: 13,
+                        color: AppColors.inkMuted,
+                      ),
                       children: <TextSpan>[
                         const TextSpan(text: 'I agree to the '),
                         _linkSpan('Rules of the Paper'),

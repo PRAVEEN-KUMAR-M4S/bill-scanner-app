@@ -5,68 +5,67 @@ import '../../../../core/utils/date_formats.dart';
 import '../../../bills/domain/entities/bill.dart';
 import '../../../bills/domain/entities/bill_category.dart';
 import '../../../bills/domain/entities/bill_item.dart';
+import '../../../bills/domain/entities/bill_problem.dart';
 
 /// Raw text for one editable line item, kept as strings so partial input
-/// ("1.", "34") does not get rewritten while the user types.
+/// ("34", "34.") does not get rewritten while the user types.
 class ReviewItemInput extends Equatable {
   const ReviewItemInput({
     required this.id,
     required this.name,
     required this.quantityText,
-    required this.priceText,
+    required this.amountText,
   });
 
   factory ReviewItemInput.fromItem(BillItem item, int id) {
     return ReviewItemInput(
       id: id,
       name: item.name,
-      quantityText: item.quantity.toString(),
-      priceText: Currency.amount(item.priceEach),
+      quantityText: item.quantity?.toString() ?? '',
+      amountText: Currency.amount(item.amount),
     );
   }
 
   final int id;
   final String name;
   final String quantityText;
-  final String priceText;
 
-  int get quantity => int.tryParse(quantityText.trim()) ?? 0;
+  /// The printed amount for the whole line, not a unit price.
+  final String amountText;
 
-  double get priceEach => Currency.parse(priceText) ?? 0;
+  int? get quantity => int.tryParse(quantityText.trim());
 
-  double get lineTotal => quantity * priceEach;
+  double get amount => Currency.parse(amountText) ?? 0;
+
+  double get lineTotal => amount;
 
   bool get isValid =>
-      name.trim().isNotEmpty && quantity > 0 && priceEach >= 0;
+      name.trim().isNotEmpty && amountText.trim().isNotEmpty && amount >= 0;
 
   bool get hasAnyValue =>
       name.trim().isNotEmpty ||
       quantityText.trim().isNotEmpty ||
-      priceText.trim().isNotEmpty;
+      amountText.trim().isNotEmpty;
 
   BillItem toItem() {
-    return BillItem(
-      name: name.trim(),
-      quantity: quantity,
-      priceEach: priceEach,
-    );
+    return BillItem(name: name.trim(), amount: amount, quantity: quantity);
   }
 
   ReviewItemInput copyWith({
     String? name,
     String? quantityText,
-    String? priceText,
+    String? amountText,
   }) {
     return ReviewItemInput(
       id: id,
       name: name ?? this.name,
       quantityText: quantityText ?? this.quantityText,
-      priceText: priceText ?? this.priceText,
+      amountText: amountText ?? this.amountText,
     );
   }
 
   @override
-  List<Object?> get props => <Object?>[id, name, quantityText, priceText];
+  List<Object?> get props => <Object?>[id, name, quantityText, amountText];
 }
 
 sealed class ReviewState extends Equatable {
@@ -85,12 +84,16 @@ final class ReviewEditing extends ReviewState {
     required this.totalText,
     required this.category,
     required this.items,
+    this.problems = const <BillProblem>[],
     this.isSaving = false,
     this.submitted = false,
     this.failureMessage,
   });
 
-  factory ReviewEditing.fromBill(Bill bill) {
+  factory ReviewEditing.fromBill(
+    Bill bill, {
+    List<BillProblem> problems = const <BillProblem>[],
+  }) {
     return ReviewEditing(
       source: bill,
       merchant: bill.merchant,
@@ -101,16 +104,20 @@ final class ReviewEditing extends ReviewState {
         for (int i = 0; i < bill.items.length; i++)
           ReviewItemInput.fromItem(bill.items[i], i + 1),
       ],
+      problems: problems,
     );
   }
 
-  /// The values the review started from; keeps the id and sample flag.
+  /// The values the review started from; keeps the id and source metadata.
   final Bill source;
   final String merchant;
   final String dateText;
   final String totalText;
   final BillCategory category;
   final List<ReviewItemInput> items;
+
+  /// Fields the scanner or the server flagged. Empty when the draft is clean.
+  final List<BillProblem> problems;
   final bool isSaving;
   final bool submitted;
   final String? failureMessage;
@@ -147,6 +154,10 @@ final class ReviewEditing extends ReviewState {
       date: date!,
       total: total!,
       category: category,
+      currency: source.currency,
+      roundOff: source.roundOff,
+      icon: source.icon,
+      notes: source.notes,
       items: <BillItem>[
         for (final ReviewItemInput item in items)
           if (item.hasAnyValue) item.toItem(),
@@ -160,6 +171,7 @@ final class ReviewEditing extends ReviewState {
     String? totalText,
     BillCategory? category,
     List<ReviewItemInput>? items,
+    List<BillProblem>? problems,
     bool? isSaving,
     bool? submitted,
     String? failureMessage,
@@ -172,6 +184,7 @@ final class ReviewEditing extends ReviewState {
       totalText: totalText ?? this.totalText,
       category: category ?? this.category,
       items: items ?? this.items,
+      problems: problems ?? this.problems,
       isSaving: isSaving ?? this.isSaving,
       submitted: submitted ?? this.submitted,
       failureMessage: clearFailure
@@ -188,6 +201,7 @@ final class ReviewEditing extends ReviewState {
     totalText,
     category,
     items,
+    problems,
     isSaving,
     submitted,
     failureMessage,

@@ -6,6 +6,7 @@ import '../../domain/usecases/continue_as_guest.dart';
 import '../../domain/usecases/register_account.dart';
 import '../../domain/usecases/sign_in_with_email.dart';
 import '../../domain/usecases/sign_in_with_provider.dart';
+import '../../domain/usecases/sign_out.dart';
 import 'auth_event.dart';
 import 'auth_state.dart';
 
@@ -15,11 +16,18 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     required RegisterAccount registerAccount,
     required SignInWithProvider signInWithProvider,
     required ContinueAsGuest continueAsGuest,
-  })  : _signInWithEmail = signInWithEmail,
-        _registerAccount = registerAccount,
-        _signInWithProvider = signInWithProvider,
-        _continueAsGuest = continueAsGuest,
-        super(const AuthInitial()) {
+    required SignOut signOut,
+    AppUser? restoredUser,
+  }) : _signInWithEmail = signInWithEmail,
+       _registerAccount = registerAccount,
+       _signInWithProvider = signInWithProvider,
+       _continueAsGuest = continueAsGuest,
+       _signOut = signOut,
+       super(
+         restoredUser == null
+             ? const AuthInitial()
+             : AuthAuthenticated(restoredUser),
+       ) {
     on<AuthSignInRequested>(_onSignInRequested);
     on<AuthRegisterRequested>(_onRegisterRequested);
     on<AuthProviderSignInRequested>(_onProviderSignInRequested);
@@ -31,6 +39,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final RegisterAccount _registerAccount;
   final SignInWithProvider _signInWithProvider;
   final ContinueAsGuest _continueAsGuest;
+  final SignOut _signOut;
 
   Future<void> _onSignInRequested(
     AuthSignInRequested event,
@@ -70,11 +79,18 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     return _run(emit, _continueAsGuest.call);
   }
 
-  void _onSignOutRequested(
+  Future<void> _onSignOutRequested(
     AuthSignOutRequested event,
     Emitter<AuthState> emit,
-  ) {
+  ) async {
+    // Return to the signed-out state immediately; revoking the refresh token
+    // at the server is best-effort and must not hold the UI hostage.
     emit(const AuthInitial());
+    try {
+      await _signOut();
+    } on Exception {
+      // The local session is already gone.
+    }
   }
 
   Future<void> _run(
@@ -86,6 +102,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       emit(AuthAuthenticated(await request()));
     } on AuthFailure catch (failure) {
       emit(AuthError(failure.message));
+    } on Exception {
+      emit(const AuthError('Something went wrong. Please try again.'));
     }
   }
 }

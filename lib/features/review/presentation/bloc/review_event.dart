@@ -65,8 +65,8 @@ final class ReviewItemQuantityChanged extends ReviewEvent {
   List<Object?> get props => <Object?>[index, value];
 }
 
-final class ReviewItemPriceChanged extends ReviewEvent {
-  const ReviewItemPriceChanged({required this.index, required this.value});
+final class ReviewItemAmountChanged extends ReviewEvent {
+  const ReviewItemAmountChanged({required this.index, required this.value});
 
   final int index;
   final String value;

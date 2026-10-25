@@ -37,8 +37,11 @@ class BillSummary {
       }
     }
 
-    final DateTime start = DateTime(year, month, today.day)
-        .subtract(const Duration(days: 6));
+    final DateTime start = DateTime(
+      year,
+      month,
+      today.day,
+    ).subtract(const Duration(days: 6));
     final List<DaySpend> week = <DaySpend>[];
     for (int offset = 0; offset < 7; offset++) {
       final DateTime day = DateTime(

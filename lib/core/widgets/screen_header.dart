@@ -36,11 +36,7 @@ class ScreenHeader extends StatelessWidget {
               child: const SizedBox(
                 width: 32,
                 height: 28,
-                child: Icon(
-                  Icons.arrow_back,
-                  size: 22,
-                  color: AppColors.ink,
-                ),
+                child: Icon(Icons.arrow_back, size: 22, color: AppColors.ink),
               ),
             ),
           ),

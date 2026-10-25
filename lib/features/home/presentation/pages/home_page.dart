@@ -79,11 +79,7 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  List<Widget> _loaded(
-    BuildContext context,
-    BillsLoaded state,
-    DateTime now,
-  ) {
+  List<Widget> _loaded(BuildContext context, BillsLoaded state, DateTime now) {
     final BillSummary summary = BillSummary.fromBills(state.bills, now);
     final List<Bill> recent = state.recent();
 
@@ -94,8 +90,7 @@ class HomePage extends StatelessWidget {
         icon: Icons.photo_camera_outlined,
         title: 'Add a bill',
         subtitle: 'Snap a photo or enter it yourself',
-        onTap: () =>
-            Navigator.of(context).pushNamed(AddBillPage.routeName),
+        onTap: () => Navigator.of(context).pushNamed(AddBillPage.routeName),
       ),
       const SizedBox(height: AppSpacing.xl),
       SectionHeading(
@@ -119,15 +114,15 @@ class HomePage extends StatelessWidget {
 
   Future<void> _showProfile(BuildContext context) async {
     final AuthState authState = context.read<AuthBloc>().state;
-    final AppUser? user = authState is AuthAuthenticated ? authState.user : null;
+    final AppUser? user = authState is AuthAuthenticated
+        ? authState.user
+        : null;
 
     final bool? signOut = await showModalBottomSheet<bool>(
       context: context,
       backgroundColor: AppColors.paper,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(AppRadius.xl),
-        ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
       ),
       builder: (BuildContext sheetContext) {
         return SafeArea(
@@ -436,10 +431,7 @@ class _SevenDayStrip extends StatelessWidget {
               const SizedBox(height: 5),
               Text(
                 days[i].label,
-                style: AppFonts.label(
-                  size: 7.5,
-                  color: AppColors.inkMuted,
-                ),
+                style: AppFonts.label(size: 7.5, color: AppColors.inkMuted),
               ),
             ],
           ),
@@ -494,10 +486,7 @@ class _DashboardFailure extends StatelessWidget {
       children: <Widget>[
         Text(
           message,
-          style: AppFonts.display(
-            size: 12.5,
-            color: AppColors.inkMuted,
-          ),
+          style: AppFonts.display(size: 12.5, color: AppColors.inkMuted),
         ),
         const SizedBox(height: AppSpacing.md),
         PaperButton(

@@ -26,11 +26,12 @@ class TextLink extends StatelessWidget {
       onTap: onTap,
       child: Text(
         label,
-        style: AppFonts.display(size: size, weight: weight, color: color).copyWith(
-          decoration: TextDecoration.underline,
-          decorationColor: AppColors.accent,
-          decorationThickness: 2.5,
-        ),
+        style: AppFonts.display(size: size, weight: weight, color: color)
+            .copyWith(
+              decoration: TextDecoration.underline,
+              decorationColor: AppColors.accent,
+              decorationThickness: 2.5,
+            ),
       ),
     );
   }

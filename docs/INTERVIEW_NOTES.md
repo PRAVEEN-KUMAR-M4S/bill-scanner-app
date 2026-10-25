@@ -11,21 +11,25 @@ debugging stories that make the project sound like work rather than a tutorial.
 > "BillScan AI is a Flutter expense app: you sign in, photograph a bill, check
 > the extracted fields, and save it. I built it feature-first with clean
 > architecture — domain, data and presentation per feature — one BLoC per
-> feature with sealed events and states, and repository contracts so the
-> in-memory backend can be swapped for a real one without touching the UI. The
-> five post-login screens are implemented from design exports, with a token-based
-> design system, shared paper components, and layouts verified from 320-pixel
-> phones up to tablets. It has twelve widget tests covering auth, navigation,
-> search, the full scan-to-save flow and multi-viewport layout, and the analyzer
-> is clean."
+> feature with sealed events and states, and repository contracts. Auth, the
+> bill list, photo extraction and confirmation all talk to a FastAPI backend
+> through one reusable `ApiService` with multipart support and typed errors; the
+> JWT pair is restored from SharedPreferences on launch. The five post-login
+> screens come from design exports, with a token-based design system, shared
+> paper components, and layouts verified from 320-pixel phones up to tablets. It
+> has 69 tests — 15 widget paths and 54 unit tests (network, data and the
+> scan bloc) — and the
+> analyzer is clean."
 
 ---
 
 ## 2. The two-minute walkthrough
 
 1. **Auth** — `WelcomePage` offers guest, sign-in and registration. Forms use
-   `Form` + validators; `AuthBloc` emits loading/authenticated/error, and a single
-   listener in `app.dart` moves the stack to the shell or shows a snack bar.
+   `Form` + validators; `AuthBloc` emits loading/authenticated/error. Email auth
+   goes `AuthBloc → ApiAuthRepository → AuthApi → ApiService`, stores the token
+   pair and loads `/auth/me`; one listener in `app.dart` moves the stack to the
+   shell or shows a snack bar.
 2. **Shell** — Home and Bills live in an `IndexedStack` behind a custom bottom
    bar. A single app-level `BillsBloc` feeds both so they never disagree.
 3. **Dashboard** — derived month totals and a seven-day strip from
@@ -34,15 +38,16 @@ debugging stories that make the project sound like work rather than a tutorial.
    handled in the bloc; the full list is kept separately so the dashboard total
    is not filtered.
 5. **Scan** — Add-a-bill offers capture, library, manual entry and a sample.
-   The camera screen uses a custom-painted frame and a cream sheet; allowing the
-   camera emits `ScanScanning`, then `ScanCaptured`.
+   The camera screen uses a custom-painted frame and a cream sheet; a photo is
+   picked with `image_picker`, sent to `/bills/extract`, and `ScanCaptured`
+   carries the draft plus the server's problems into review.
 6. **Review** — a stateful form: raw strings in the state, derived validation
    (`merchantValid`, `dateValid`, `totalValid`, item rules), add/remove items,
    totals, and save. On success `ReviewSaved` triggers a bills reload, a snack
    bar and a pop to the shell.
 7. **Quality** — 13 shared design-system widgets, design tokens instead of
-   hardcoded values, responsive patterns, 12 widget tests at three viewports,
-   zero analyzer issues.
+   hardcoded values, responsive patterns, 69 tests (15 widget + 54 unit)
+   and zero analyzer issues.
 
 ---
 
@@ -91,11 +96,13 @@ tap → event → bloc → use case → repository (interface)
 | Repository interfaces | UI/test substitute without mocking widgets | One extra contract per feature |
 | Hand-written `copyWith`/`props` | No build step; small states | Use freezed when states multiply |
 | `AppDependencies` instead of `get_it` | One obvious composition root, easy constructor injection | Manual wiring grows; move to get_it when the graph does |
+| `http` + a hand-written `ApiService` | Four verbs, JSON, bearer auth and typed errors in one tested file | Revisit Dio when interceptors, retries or uploads stack up |
+| Token pair in SharedPreferences | A restart keeps the session without a secure-store dependency yet | Not a vault; swap the storage implementation for Keychain/Keystore before shipping |
 | One BillsBloc for two screens | No sync logic; one source of truth | Holds both all/filtered lists; acceptable at this size |
 | `IndexedStack` for tabs | Keeps scroll/state per tab | Both pages stay in the tree; tests must scope finders |
 | Raw strings in review state | Partial input (`1.`, empty) does not fight the user | Parse/validate in getters; use domain values on submit |
 | Demo chart from real data | Honest product behaviour | Does not replicate the export's decorative tall bar |
-| In-memory repositories | No backend/keys needed to demo; realistic latency | Data resets on restart; swap in data layer only |
+| API repositories for auth/bills + image_picker | Real end-to-end flow without a bespoke camera preview | In-memory/simulated implementations remain for deterministic tests |
 
 ---
 
@@ -175,15 +182,19 @@ tap → event → bloc → use case → repository (interface)
 > refetches from the same repository instance and emits an updated list. The
 > dashboard and list both rebuild. No manual copying between screens.
 
-**Q: How would you add a real backend?**
-> Implement `BillRepository`/`AuthRepository`/`ScanRepository` with HTTP/OCR and
-> change the defaults in `AppDependencies`. Pages and blocs are untouched. For
-> offline support, wrap the remote repository in a caching repository that
-> implements the same interface.
+**Q: How is the backend wired?**
+> Through `ApiService` → `AuthApi`/`BillApi` → `ApiAuthRepository`/`ApiBillRepository`,
+> with `MockClient` tests for every status branch. All paths live in
+> `ApiEndpoints`; `BillMapper` owns the JSON rules (rupees as strings, ISO
+> dates, ten category slugs, whole-line amounts). Swapping a repository is one
+> line in `AppDependencies`; pages and blocs stay untouched. For offline
+> support, wrap the remote bills repository in a caching decorator.
 
-**Q: How would you add persistence?**
-> A `LocalBillRepository` (or a decorator that writes through to
-> SharedPreferences/Isar/Drift) behind the same interface; inject it in
+**Q: How does persistence work?**
+> The session (tokens + profile) is written through `SessionStorage` to
+> SharedPreferences and restored before `runApp`; tests use the in-memory
+> implementation. Bills live on the server. For offline bills, add a
+> `LocalBillRepository` decorator behind the same interface and inject it in
 > `AppDependencies`.
 
 **Q: Why keep the sample bill in two repositories?**
@@ -197,10 +208,12 @@ tap → event → bloc → use case → repository (interface)
 > for a demo. In a production model I would separate "draft source" from the
 > persisted bill.
 
-**Q: No JSON/serialization?**
-> Nothing crosses a network boundary yet. When it does, add `fromJson`/`toJson`
-> (or json_serializable) in the data layer so the domain entities stay free of
-> transport concerns.
+**Q: JSON/serialization?**
+> Auth has it now: `AuthTokens` and `ApiUser` parse the five responses in the
+> data layer, so domain entities never see transport shapes. The bill endpoints
+> do not have a list yet, so bills still have no JSON mapper; when they do, a
+> `BillJson` mapper belongs in `features/bills/data`. Three small classes do not
+> justify `json_serializable` yet.
 
 ### UI, design and responsiveness
 
@@ -242,16 +255,22 @@ tap → event → bloc → use case → repository (interface)
 ### Testing
 
 **Q: What is your testing strategy?**
-> Widget tests through the real UI with real blocs and instant in-memory
-> repositories. They cover the user paths: auth validation and success, guest
-> entry, tab switching, search/filtering, the scan state progression, review
-> validation, adding items, saving and the dashboard reload, sign-out,
-> duplicate-email errors, and no-overflow at three viewport sizes.
+> Two levels. Widget tests drive the real UI and blocs with instant in-memory
+> repositories (and one `ApiAuthRepository` backed by `MockClient`), covering
+> auth validation and success, session restore, guest entry, tab switching,
+> search/filtering, the scan state progression, review validation, items,
+> save/reload, sign-out, duplicate emails and no-overflow at three widths. Unit
+> tests call `ApiService`, `AuthApi`/`ApiAuthRepository`, `BillApi`, the token
+> store and the scan repository directly: 401/409/413/415/422/429/5xx, timeout,
+> offline, malformed JSON, multipart, token attach/restore, refresh rotation,
+> best-effort logout, list/extract/confirm mapping and 422 problem propagation.
 
 **Q: How do you test an async scanning state?**
-> The scan repository takes 120 ms in tests; tap "Allow camera", `pump(16ms)` to
-> assert "Reading your bill…" and `02 / 02`, then `pumpAndSettle()` to reach
-> review. The latency is injectable, so the test is deterministic.
+> The scan repository takes 120 ms in tests: the screen asks for access in
+> `initState`, so after the shutter press `pump(16ms)` shows "Reading your bill…"
+> and `02 / 02`, then `pumpAndSettle()` reaches review. The camera and the
+> repository are both injected fakes, so a denied permission, a failed shutter
+> and the torch are all testable without a device.
 
 **Q: Why do finders need scoping?**
 > The shell's `IndexedStack` keeps Home and Bills in the tree. `find.text` would
@@ -259,9 +278,12 @@ tap → event → bloc → use case → repository (interface)
 > is a real consequence of preserving tab state.
 
 **Q: What isn't tested?**
-> Pure bloc unit tests, goldens, integration tests on a device, and the real
-> camera/OCR/backend. I'd add `bloc_test` for the state matrices, golden tests
-> for the paper components, and an integration test for a real capture.
+> Goldens, device integration, and an automated run against the live API (the
+> network tests use `MockClient`; I exercised real sign-in, listing and
+> confirmation manually). The camera and the image picker are only tested
+> through their injected replacements — `ScanBloc` does have unit tests. I'd add `bloc_test` for the state
+> matrices, golden tests for the paper components, and an integration test for
+> a real capture.
 
 **Q: Why disable Google Fonts in tests?**
 > Tests must not depend on the network; disabling runtime fetching keeps them
@@ -283,9 +305,12 @@ tap → event → bloc → use case → repository (interface)
 > `excludeSemantics` and a stronger active tint.
 
 **Q: Security?**
-> There is no real auth token or backend yet. Passwords are only used to
-> simulate length validation and are not stored. A real build needs HTTPS,
-> secure storage for tokens, no credential logging, and session expiry.
+> Passwords are sent to the API (HTTPS in production), which stores bcrypt
+> hashes; the app never stores the password. The access token (30 min JWT) and
+> refresh token are persisted in SharedPreferences for the demo, never logged,
+> and cleared on sign-out; the refresh token is revoked server-side. A shipping
+> build still needs Keychain/Keystore storage, automatic 401 → refresh → retry,
+> and rate limiting on the API.
 
 ---
 
@@ -369,10 +394,18 @@ the page reacts to once.
 ### 6.4 Composition root
 
 ```dart
-final deps = AppDependencies(); // real repositories
+final deps = await AppDependencies.create(); // SharedPreferences → session → API
 runApp(BillScannerApp(dependencies: deps));
 
-// tests:
+// network test: the real repository, a MockClient instead of the socket
+AppDependencies(
+  authRepository: ApiAuthRepository(
+    authApi: AuthApi(ApiService(baseUrl: ..., client: MockClient(...))),
+    tokens: AuthTokenStore(),
+  ),
+)
+
+// widget tests: instant fakes
 AppDependencies(
   authRepository: InMemoryAuthRepository(latency: Duration.zero),
   billRepository: InMemoryBillRepository(latency: Duration.zero),
@@ -380,8 +413,8 @@ AppDependencies(
 )
 ```
 
-Talking point: the exact same app graph in tests, only latencies differ; no
-global singleton to reset.
+Talking point: the graph is the only thing that changes between live, mocked and
+in-memory runs; no global singleton to reset.
 
 ### 6.5 Route-scoped blocs with arguments
 
@@ -417,6 +450,24 @@ SingleChildScrollView(
 Talking point: one widget gives every page scroll safety, a readable measure and
 responsive gutters.
 
+### 6.7 One HTTP client, four verbs
+
+```dart
+final Object? json = await _api.post(
+  '/auth/login',
+  body: {'email': email, 'password': password},
+);
+```
+
+The call site is one line because `ApiService` owns the base URL, JSON
+encoding/decoding, `Authorization: Bearer …` when `authenticated: true`, the
+timeout, and turning 401/409/422/429/5xx into typed exceptions. `AuthApi` owns
+the URLs and field names; `ApiAuthRepository` turns exceptions into
+`AuthFailure`s. Blocs never import `package:http`.
+
+Talking point: swapping `get/post/put/delete` for another transport means
+rewriting one file and its tests, not every data source.
+
 ---
 
 ## 7. Feature scripts (90 seconds each)
@@ -424,12 +475,13 @@ responsive gutters.
 ### Scan flow
 
 > "Add-a-bill has four entry points: camera, library, manual and a sample. The
-> camera route creates a route-scoped ScanBloc. Its idle state is the permission
-> sheet; allowing the camera emits Scanning, the simulated OCR returns a Bill,
-> and ScanCaptured pushes the review route with that bill. If the scan fails, the
-> page shows a snack bar and resets. The frame is a CustomPainter — thin outline,
-> mid guide, four accent brackets — and the sheet is height-capped and scrolls on
-> small phones."
+> camera route creates a route-scoped ScanBloc and receives a ScanSource. Its
+> idle state is the permission sheet; the primary action picks a photo with
+> image_picker and emits Scanning, ApiScanRepository sends the bytes to
+> /bills/extract, and ScanCaptured pushes review with the draft and problems.
+> If the scan fails, the page shows a snack bar and resets. The frame is a
+> CustomPainter — thin outline, mid guide, four accent brackets — and the sheet
+> is height-capped and scrolls on small phones."
 
 ### Review state
 
@@ -472,6 +524,12 @@ responsive gutters.
 6. **Tests tapped off-screen chips after horizontal scrolling.** Fix:
    `ensureVisible` before tapping and unmounting the app between viewport
    iterations so the navigator stack resets.
+7. **Sign-in passed the tests but failed in Chrome.** The mocked tests never
+   send a CORS preflight. `OPTIONS /auth/login` answered 405 with no
+   `Access-Control-Allow-Origin`, so the browser refused the POST even though
+   the client was correct. I confirmed the data layer through a logging proxy
+   and logged the missing backend `CORSMiddleware` as a deployment task. The
+   lesson: `MockClient` proves your client, not the deployment.
 
 ---
 
@@ -482,28 +540,33 @@ responsive gutters.
 | Post-login screens | 5 |
 | Auth screens | 3 |
 | Features | 5 (`auth`, `bills`, `home`, `scan`, `review`) |
-| Dart files in `lib` | 71 |
-| Lines in `lib` | ≈ 6,264 |
+| Dart files in `lib` | 80 |
+| Lines in `lib` | ≈ 7,035 |
 | Shared widgets | 13 |
-| Widget tests | 12 (all passing) |
+| Widget tests | 13 |
+| Network/auth unit tests | 23 |
+| Total tests | 36 (all passing) |
 | Analyzer issues | 0 |
+| Integrated API endpoints | 5 auth (register, login, refresh, logout, me) |
 | Design tokens | 12 colours, 6 spacings, 5 radii, 3 strokes, 2 shadows |
 | Responsive widths verified | 320×568, 390×844, 800×1000 |
-| Simulated latencies | auth 700 ms, bills 350 ms, scan 1200 ms |
+| Test latencies | bills 0 ms in widget tests, scan 120 ms (production is real HTTP) |
 
 ---
 
 ## 10. What I would improve next (priority order)
 
-1. **Real persistence and backend** — implement repository interfaces, add
-   caching; no UI changes.
-2. **Real camera + OCR** — `camera` + ML Kit/hosted OCR, permission handling,
-   failure/retry UX.
-3. **Bloc unit tests** with `bloc_test` for the full validation/filtering
+1. **Offline bill cache** — a `LocalBillRepository` decorator so the dashboard
+   still renders without the API; no UI changes.
+2. **Secure sessions** — Keychain/Keystore token storage and automatic
+   401 → refresh → retry (the repository already rotates the pair).
+3. **Camera preview** — replace the file picker with a live `camera` preview;
+   extraction and failure UX already exist.
+4. **Bloc unit tests** with `bloc_test` for the full validation/filtering
    matrices.
-4. **Accessibility pass** — fix duplicate semantics labels, raise active-tab
+5. **Accessibility pass** — fix duplicate semantics labels, raise active-tab
    contrast, test text scaling at 2.0.
-5. **Design polish** — measurement against the 412-px exports, tablet
+6. **Design polish** — measurement against the 412-px exports, tablet
    two-column layouts, exact chart presentation with a demo clock.
 6. **Localisation** — `intl`, currency/locale, extracted strings.
 7. **CI** — `flutter analyze`, `flutter test`, format check on every push.

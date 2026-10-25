@@ -1,6 +1,21 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- The in-app bill camera. Requested at runtime when the scan screen
+         opens; not required, so the app still installs on cameras-free
+         devices (and the library path works there). -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <!-- Overrides the "required" flag a plugin contributes: the scanner falls
+         back to the photo library when there is no camera. -->
+    <uses-feature
+        android:name="android.hardware.camera.any"
+        android:required="false"
+        tools:replace="android:required"/>
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false"/>
+
     <application
-        android:label="bill_scanner"
+        android:label="Bill Scanner"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

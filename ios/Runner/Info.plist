@@ -45,5 +45,22 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<!-- Bill photos: camera capture and library selection. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Billo uses the camera to photograph a bill you want to save.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Billo reads a bill photo you choose from your library.</string>
+	<!-- The scan screen opens the camera to photograph a bill. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Billo uses the camera to photograph a bill so it can read the totals for you.</string>
+	<!-- The library shortcut and the manual entry preview both read photos. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Choose a photo of a bill so Billo can read its totals.</string>
+	<!-- The development API is plain HTTP on the local network. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

@@ -10,6 +10,7 @@ import '../../../../core/widgets/screen_header.dart';
 import '../../../../core/widgets/section_label.dart';
 import '../../../bills/domain/entities/bill.dart';
 import '../../../review/presentation/pages/review_page.dart';
+import '../../domain/entities/scan_source.dart';
 import 'scan_page.dart';
 import '../widgets/scanner_illustration.dart';
 
@@ -22,8 +23,8 @@ class AddBillPage extends StatelessWidget {
   /// Bundled demo bill supplied by the injector.
   final Bill sampleBill;
 
-  void _openCamera(BuildContext context) {
-    Navigator.of(context).pushNamed(ScanPage.routeName);
+  void _openScan(BuildContext context, ScanSource source) {
+    Navigator.of(context).pushNamed(ScanPage.routeName, arguments: source);
   }
 
   void _openReview(BuildContext context, Bill bill) {
@@ -76,7 +77,7 @@ class AddBillPage extends StatelessWidget {
               horizontal: AppSpacing.lg,
               vertical: AppSpacing.lg - 2,
             ),
-            onPressed: () => _openCamera(context),
+            onPressed: () => _openScan(context, ScanSource.camera),
           ),
           const SizedBox(height: AppSpacing.md + 2),
           PaperButton(
@@ -89,7 +90,7 @@ class AddBillPage extends StatelessWidget {
               horizontal: AppSpacing.lg,
               vertical: AppSpacing.lg - 2,
             ),
-            onPressed: () => _openCamera(context),
+            onPressed: () => _openScan(context, ScanSource.gallery),
           ),
           const SizedBox(height: AppSpacing.xl - 2),
           const _OrDivider(),

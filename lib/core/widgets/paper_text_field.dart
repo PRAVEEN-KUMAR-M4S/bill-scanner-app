@@ -66,7 +66,8 @@ class PaperTextField extends StatelessWidget {
               Expanded(
                 child: Text(
                   label!,
-                  style: labelStyle ??
+                  style:
+                      labelStyle ??
                       AppFonts.display(size: 13, weight: FontWeight.w700),
                 ),
               ),

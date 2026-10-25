@@ -15,6 +15,7 @@ import '../../../../core/widgets/screen_header.dart';
 import '../../../../core/widgets/section_heading.dart';
 import '../../../../core/widgets/section_label.dart';
 import '../../../bills/domain/entities/bill_category.dart';
+import '../../../bills/domain/entities/bill_problem.dart';
 import '../../../bills/presentation/bloc/bills_bloc.dart';
 import '../../../bills/presentation/bloc/bills_event.dart';
 import '../bloc/review_bloc.dart';
@@ -42,16 +43,14 @@ class ReviewPage extends StatelessWidget {
       listener: (BuildContext context, ReviewState state) {
         if (state is ReviewSaved) {
           context.read<BillsBloc>().add(const BillsReloaded());
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Bill saved')),
-          );
-          Navigator.of(context).popUntil(
-            ModalRoute.withName(AppRoutes.shell),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Bill saved')));
+          Navigator.of(context).popUntil(ModalRoute.withName(AppRoutes.shell));
         } else if (state is ReviewEditing && state.failureMessage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.failureMessage!)),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(state.failureMessage!)));
         }
       },
       builder: (BuildContext context, ReviewState state) {
@@ -81,12 +80,16 @@ class ReviewPage extends StatelessWidget {
                 const _SampleBanner(),
                 const SizedBox(height: AppSpacing.md),
               ],
+              if (editing.problems.isNotEmpty) ...<Widget>[
+                _ProblemsBanner(problems: editing.problems),
+                const SizedBox(height: AppSpacing.md),
+              ],
               _BillDetailsCard(editing: editing),
               const SizedBox(height: AppSpacing.xl),
               SectionHeading(
                 title: 'Items',
                 subtitle:
-                    'Price is per item; quantity is included in the check.',
+                    'Amount is the printed total for each line, not a unit price.',
                 titleSize: 26,
                 trailing: const _AddItemAction(),
               ),
@@ -102,11 +105,8 @@ class ReviewPage extends StatelessWidget {
               if (editing.submitted && !editing.itemsValid) ...<Widget>[
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  'Each item needs a name, a quantity and a price.',
-                  style: AppFonts.display(
-                    size: 11.5,
-                    color: AppColors.danger,
-                  ),
+                  'Each item needs a name and a line amount.',
+                  style: AppFonts.display(size: 11.5, color: AppColors.danger),
                 ),
               ],
               const SizedBox(height: AppSpacing.lg),
@@ -133,9 +133,8 @@ class ReviewPage extends StatelessWidget {
                   horizontal: AppSpacing.lg,
                   vertical: AppSpacing.lg,
                 ),
-                onPressed: () => context.read<ReviewBloc>().add(
-                  const ReviewSubmitted(),
-                ),
+                onPressed: () =>
+                    context.read<ReviewBloc>().add(const ReviewSubmitted()),
               ),
             ],
           ),
@@ -169,6 +168,52 @@ class _InrPill extends StatelessWidget {
   }
 }
 
+class _ProblemsBanner extends StatelessWidget {
+  const _ProblemsBanner({required this.problems});
+
+  final List<BillProblem> problems;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.danger, width: AppStroke.thin),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            problems.length == 1
+                ? '1 field needs a check'
+                : '${problems.length} fields need a check',
+            style: AppFonts.display(
+              size: 12,
+              weight: FontWeight.w700,
+              color: AppColors.danger,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (final BillProblem problem in problems)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Text(
+                '• ${problem.message}',
+                style: AppFonts.display(
+                  size: 11,
+                  color: AppColors.inkMuted,
+                  height: 1.35,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SampleBanner extends StatelessWidget {
   const _SampleBanner();
 
@@ -185,11 +230,7 @@ class _SampleBanner extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          const Icon(
-            Icons.info_outline,
-            size: 16,
-            color: AppColors.inkMuted,
-          ),
+          const Icon(Icons.info_outline, size: 16, color: AppColors.inkMuted),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
@@ -284,10 +325,7 @@ class _BillDetailsCard extends StatelessWidget {
                 ),
                 child: Text(
                   '${editing.readyCount} / 3',
-                  style: AppFonts.display(
-                    size: 11.5,
-                    weight: FontWeight.w700,
-                  ),
+                  style: AppFonts.display(size: 11.5, weight: FontWeight.w700),
                 ),
               ),
             ],
@@ -323,9 +361,8 @@ class _BillDetailsCard extends StatelessWidget {
             errorText: editing.submitted && !editing.merchantValid
                 ? 'Add the shop or merchant'
                 : null,
-            onChanged: (String value) => context.read<ReviewBloc>().add(
-              ReviewMerchantChanged(value),
-            ),
+            onChanged: (String value) =>
+                context.read<ReviewBloc>().add(ReviewMerchantChanged(value)),
           ),
           const SizedBox(height: AppSpacing.md + 2),
           LayoutBuilder(
@@ -340,9 +377,8 @@ class _BillDetailsCard extends StatelessWidget {
                 errorText: editing.submitted && !editing.dateValid
                     ? 'Use YYYY-MM-DD'
                     : null,
-                onChanged: (String value) => context.read<ReviewBloc>().add(
-                  ReviewDateChanged(value),
-                ),
+                onChanged: (String value) =>
+                    context.read<ReviewBloc>().add(ReviewDateChanged(value)),
               );
               final Widget totalField = PaperTextField(
                 key: const ValueKey<String>('review-total'),
@@ -357,9 +393,8 @@ class _BillDetailsCard extends StatelessWidget {
                 errorText: editing.submitted && !editing.totalValid
                     ? 'Add the total'
                     : null,
-                onChanged: (String value) => context.read<ReviewBloc>().add(
-                  ReviewTotalChanged(value),
-                ),
+                onChanged: (String value) =>
+                    context.read<ReviewBloc>().add(ReviewTotalChanged(value)),
               );
 
               // Only very narrow phones stack; 390px still shows the designed
@@ -554,9 +589,8 @@ class _ItemCard extends StatelessWidget {
                 button: true,
                 label: 'Remove item $number',
                 child: InkWell(
-                  onTap: () => context.read<ReviewBloc>().add(
-                    ReviewItemRemoved(index),
-                  ),
+                  onTap: () =>
+                      context.read<ReviewBloc>().add(ReviewItemRemoved(index)),
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                   child: const SizedBox(
                     width: 28,
@@ -595,16 +629,16 @@ class _ItemCard extends StatelessWidget {
                   ReviewItemQuantityChanged(index: index, value: value),
                 ),
               );
-              final Widget price = PaperTextField(
-                key: ValueKey<String>('item-${item.id}-price'),
-                label: 'PRICE EACH · ₹',
+              final Widget amount = PaperTextField(
+                key: ValueKey<String>('item-${item.id}-amount'),
+                label: 'LINE AMOUNT · ₹',
                 labelStyle: labelStyle,
-                initialValue: item.priceText,
+                initialValue: item.amountText,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
                 onChanged: (String value) => context.read<ReviewBloc>().add(
-                  ReviewItemPriceChanged(index: index, value: value),
+                  ReviewItemAmountChanged(index: index, value: value),
                 ),
               );
 
@@ -613,7 +647,7 @@ class _ItemCard extends StatelessWidget {
                   children: <Widget>[
                     quantity,
                     const SizedBox(height: AppSpacing.md),
-                    price,
+                    amount,
                   ],
                 );
               }
@@ -623,7 +657,7 @@ class _ItemCard extends StatelessWidget {
                 children: <Widget>[
                   SizedBox(width: 92, child: quantity),
                   const SizedBox(width: AppSpacing.md),
-                  Expanded(child: price),
+                  Expanded(child: amount),
                 ],
               );
             },
@@ -655,10 +689,7 @@ class _TotalsCard extends StatelessWidget {
               const Spacer(),
               Text(
                 Currency.inr(editing.itemsTotal),
-                style: AppFonts.display(
-                  size: 13.5,
-                  weight: FontWeight.w700,
-                ),
+                style: AppFonts.display(size: 13.5, weight: FontWeight.w700),
               ),
             ],
           ),
@@ -674,18 +705,12 @@ class _TotalsCard extends StatelessWidget {
             children: <Widget>[
               Text(
                 'Total',
-                style: AppFonts.display(
-                  size: 16,
-                  weight: FontWeight.w800,
-                ),
+                style: AppFonts.display(size: 16, weight: FontWeight.w800),
               ),
               const Spacer(),
               Text(
                 Currency.inr(editing.total ?? 0),
-                style: AppFonts.display(
-                  size: 20,
-                  weight: FontWeight.w800,
-                ),
+                style: AppFonts.display(size: 20, weight: FontWeight.w800),
               ),
             ],
           ),

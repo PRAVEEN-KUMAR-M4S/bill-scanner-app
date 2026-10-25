@@ -2,6 +2,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/entities/bill.dart';
 import '../../domain/entities/bill_category.dart';
+import '../../domain/failures/bill_failure.dart';
 import '../../domain/usecases/fetch_bills.dart';
 import 'bills_event.dart';
 import 'bills_state.dart';
@@ -47,6 +48,8 @@ class BillsBloc extends Bloc<BillsEvent, BillsState> {
     try {
       _bills = await _fetchBills();
       emit(_loaded());
+    } on BillFailure catch (failure) {
+      emit(BillsFailure(failure.message));
     } on Exception {
       emit(const BillsFailure('Could not load your bills. Try again.'));
     }
@@ -70,9 +73,7 @@ class BillsBloc extends Bloc<BillsEvent, BillsState> {
   BillsLoaded _loaded() {
     return BillsLoaded(
       bills: List<Bill>.unmodifiable(_bills),
-      visibleBills: List<Bill>.unmodifiable(
-        _bills.where(_matches).toList(),
-      ),
+      visibleBills: List<Bill>.unmodifiable(_bills.where(_matches).toList()),
       query: _query,
       category: _category,
     );
@@ -86,8 +87,6 @@ class BillsBloc extends Bloc<BillsEvent, BillsState> {
 
     if (bill.merchant.toLowerCase().contains(needle)) return true;
     if (bill.category.label.toLowerCase().contains(needle)) return true;
-    return bill.items.any(
-      (item) => item.name.toLowerCase().contains(needle),
-    );
+    return bill.items.any((item) => item.name.toLowerCase().contains(needle));
   }
 }

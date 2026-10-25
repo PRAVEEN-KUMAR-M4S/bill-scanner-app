@@ -39,10 +39,7 @@ abstract final class AppFonts {
     );
   }
 
-  static TextStyle hand({
-    double size = 12,
-    Color color = AppColors.ink,
-  }) {
+  static TextStyle hand({double size = 12, Color color = AppColors.ink}) {
     return GoogleFonts.caveat(
       fontSize: size,
       fontWeight: FontWeight.w600,

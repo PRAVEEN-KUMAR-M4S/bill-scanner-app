@@ -88,8 +88,13 @@ class BillTile extends StatelessWidget {
       BillCategory.foodAndDrink => Icons.local_cafe_outlined,
       BillCategory.groceries => Icons.shopping_basket_outlined,
       BillCategory.travel => Icons.luggage_outlined,
+      BillCategory.health => Icons.medication_outlined,
+      BillCategory.utilities => Icons.bolt_outlined,
       BillCategory.shopping => Icons.shopping_bag_outlined,
       BillCategory.home => Icons.home_outlined,
+      BillCategory.entertainment => Icons.movie_outlined,
+      BillCategory.education => Icons.menu_book_outlined,
+      BillCategory.other => Icons.receipt_long_outlined,
     };
   }
 }

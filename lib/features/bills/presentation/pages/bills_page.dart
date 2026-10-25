@@ -214,10 +214,7 @@ class _MonthCard extends StatelessWidget {
             count == 1
                 ? '1 bill saved this month'
                 : '$count bills saved this month',
-            style: AppFonts.display(
-              size: 11.5,
-              color: AppColors.inkMuted,
-            ),
+            style: AppFonts.display(size: 11.5, color: AppColors.inkMuted),
           ),
         ],
       ),
@@ -247,10 +244,7 @@ class _BillSearchFieldState extends State<_BillSearchField> {
   Widget build(BuildContext context) {
     final OutlineInputBorder border = OutlineInputBorder(
       borderRadius: BorderRadius.circular(AppRadius.md),
-      borderSide: const BorderSide(
-        color: AppColors.ink,
-        width: AppStroke.thin,
-      ),
+      borderSide: const BorderSide(color: AppColors.ink, width: AppStroke.thin),
     );
 
     return TextField(
@@ -303,18 +297,16 @@ class _CategoryFilters extends StatelessWidget {
           PaperChip(
             label: 'All',
             selected: selected == null,
-            onTap: () => context.read<BillsBloc>().add(
-              const BillsCategoryChanged(null),
-            ),
+            onTap: () =>
+                context.read<BillsBloc>().add(const BillsCategoryChanged(null)),
           ),
           for (final BillCategory category in BillCategory.values) ...<Widget>[
             const SizedBox(width: AppSpacing.sm),
             PaperChip(
               label: category.label,
               selected: selected == category,
-              onTap: () => context.read<BillsBloc>().add(
-                BillsCategoryChanged(category),
-              ),
+              onTap: () =>
+                  context.read<BillsBloc>().add(BillsCategoryChanged(category)),
             ),
           ],
         ],

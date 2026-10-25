@@ -52,9 +52,9 @@ abstract final class DateFormats {
 
   /// Parses an ISO `yyyy-MM-dd` value, returning null when it is not a date.
   static DateTime? parseIso(String value) {
-    final Match? match = RegExp(r'^(\d{4})-(\d{2})-(\d{2})$').firstMatch(
-      value.trim(),
-    );
+    final Match? match = RegExp(
+      r'^(\d{4})-(\d{2})-(\d{2})$',
+    ).firstMatch(value.trim());
     if (match == null) return null;
 
     final int year = int.parse(match.group(1)!);

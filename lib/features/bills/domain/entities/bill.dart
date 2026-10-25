@@ -15,6 +15,10 @@ class Bill extends Equatable {
     required this.total,
     required this.category,
     required this.items,
+    this.currency = 'INR',
+    this.roundOff,
+    this.icon,
+    this.notes,
     this.isSample = false,
   });
 
@@ -34,13 +38,29 @@ class Bill extends Equatable {
   final double total;
   final BillCategory category;
   final List<BillItem> items;
+
+  /// ISO 4217 code. The API currently accepts INR only.
+  final String currency;
+
+  /// The printed Round Off / adjustment line, signed, when the bill shows one.
+  final double? roundOff;
+
+  /// The HugeIcons name returned by the API; null for a locally entered draft.
+  final String? icon;
+  final String? notes;
   final bool isSample;
 
   bool get isSaved => id.isNotEmpty;
 
+  /// The icon to send on confirm: the one the API chose, or the category's
+  /// default for a manually entered bill.
+  String get iconName => icon ?? category.icon;
+
   /// Sum of the line items, used to sanity-check [total] on the review form.
-  double get itemsTotal =>
-      items.fold<double>(0, (double sum, BillItem item) => sum + item.lineTotal);
+  double get itemsTotal => items.fold<double>(
+    0,
+    (double sum, BillItem item) => sum + item.lineTotal,
+  );
 
   Bill copyWith({
     String? id,
@@ -49,6 +69,10 @@ class Bill extends Equatable {
     double? total,
     BillCategory? category,
     List<BillItem>? items,
+    String? currency,
+    double? roundOff,
+    String? icon,
+    String? notes,
     bool? isSample,
   }) {
     return Bill(
@@ -58,6 +82,10 @@ class Bill extends Equatable {
       total: total ?? this.total,
       category: category ?? this.category,
       items: items ?? this.items,
+      currency: currency ?? this.currency,
+      roundOff: roundOff ?? this.roundOff,
+      icon: icon ?? this.icon,
+      notes: notes ?? this.notes,
       isSample: isSample ?? this.isSample,
     );
   }
@@ -70,6 +98,10 @@ class Bill extends Equatable {
     total,
     category,
     items,
+    currency,
+    roundOff,
+    icon,
+    notes,
     isSample,
   ];
 }

@@ -34,10 +34,7 @@ class ScannerIllustration extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(size * 0.055),
-                border: Border.all(
-                  color: AppColors.ink,
-                  width: AppStroke.base,
-                ),
+                border: Border.all(color: AppColors.ink, width: AppStroke.base),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

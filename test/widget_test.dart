@@ -1,8 +1,15 @@
+import 'dart:convert';
+
 import 'package:bill_scanner/app.dart';
 import 'package:bill_scanner/core/di/injector.dart';
 import 'package:bill_scanner/core/navigation/app_shell.dart';
+import 'package:bill_scanner/core/network/api_service.dart';
 import 'package:bill_scanner/core/widgets/paper_checkbox.dart';
+import 'package:bill_scanner/features/auth/data/datasources/auth_api.dart';
+import 'package:bill_scanner/features/auth/data/repositories/api_auth_repository.dart';
 import 'package:bill_scanner/features/auth/data/repositories/in_memory_auth_repository.dart';
+import 'package:bill_scanner/features/auth/data/session/auth_token_store.dart';
+import 'package:bill_scanner/features/auth/domain/entities/app_user.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/register_page.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/sign_in_page.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/welcome_page.dart';
@@ -11,13 +18,20 @@ import 'package:bill_scanner/features/bills/presentation/pages/bills_page.dart';
 import 'package:bill_scanner/features/home/presentation/pages/home_page.dart';
 import 'package:bill_scanner/features/review/presentation/pages/review_page.dart';
 import 'package:bill_scanner/features/scan/data/repositories/simulated_scan_repository.dart';
+import 'package:bill_scanner/features/scan/presentation/camera/camera_driver.dart';
+import 'package:bill_scanner/features/scan/presentation/camera/simulated_camera_driver.dart';
 import 'package:bill_scanner/features/scan/presentation/pages/add_bill_page.dart';
 import 'package:bill_scanner/features/scan/presentation/pages/scan_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
-Widget buildApp() {
+Widget buildApp({
+  AppUser? restoredUser,
+  CameraDriver Function()? createCamera,
+}) {
   return BillScannerApp(
     dependencies: AppDependencies(
       authRepository: InMemoryAuthRepository(latency: Duration.zero),
@@ -25,6 +39,8 @@ Widget buildApp() {
       scanRepository: SimulatedScanRepository(
         latency: const Duration(milliseconds: 120),
       ),
+      createCamera: createCamera,
+      restoredUser: restoredUser,
     ),
   );
 }
@@ -46,9 +62,13 @@ Finder navTab(String label) {
 Future<void> pumpApp(
   WidgetTester tester, {
   Size size = const Size(390, 844),
+  AppUser? restoredUser,
+  CameraDriver Function()? createCamera,
 }) async {
   await tester.binding.setSurfaceSize(size);
-  await tester.pumpWidget(buildApp());
+  await tester.pumpWidget(
+    buildApp(restoredUser: restoredUser, createCamera: createCamera),
+  );
   await tester.pumpAndSettle();
 }
 
@@ -106,13 +126,34 @@ void main() {
     await pumpApp(tester);
     await continueAsGuest(tester);
 
-    expect(inPage(HomePage, find.text('Your spending,\nat a glance.')),
-        findsOneWidget);
+    expect(
+      inPage(HomePage, find.text('Your spending,\nat a glance.')),
+      findsOneWidget,
+    );
     expect(inPage(HomePage, find.text('billo')), findsOneWidget);
     expect(inPage(HomePage, find.text('₹680.00')), findsNWidgets(2));
     expect(inPage(HomePage, find.text('Recent bills')), findsOneWidget);
     expect(inPage(HomePage, find.text('Asha Tiffins')), findsOneWidget);
     expect(navTab('Home'), findsOneWidget);
+  });
+
+  testWidgets('a restored session opens the dashboard directly', (
+    WidgetTester tester,
+  ) async {
+    await pumpApp(
+      tester,
+      restoredUser: const AppUser(
+        id: '7',
+        name: 'Asha Tiffins',
+        email: 'asha@billo.app',
+      ),
+    );
+
+    expect(
+      inPage(HomePage, find.text('Your spending,\nat a glance.')),
+      findsOneWidget,
+    );
+    expect(find.byType(WelcomePage), findsNothing);
   });
 
   testWidgets('sign in rejects a malformed email', (WidgetTester tester) async {
@@ -145,8 +186,71 @@ void main() {
     await tester.tap(inPage(SignInPage, find.text('Sign In')));
     await tester.pumpAndSettle();
 
-    expect(inPage(HomePage, find.text('Your spending,\nat a glance.')),
-        findsOneWidget);
+    expect(
+      inPage(HomePage, find.text('Your spending,\nat a glance.')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('sign in through the API reaches the dashboard', (
+    WidgetTester tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+
+    final AuthTokenStore tokens = AuthTokenStore();
+    final ApiAuthRepository repository = ApiAuthRepository(
+      authApi: AuthApi(
+        ApiService(
+          baseUrl: Uri.parse('http://api.test'),
+          accessToken: () async => tokens.accessToken,
+          client: MockClient((http.Request request) async {
+            switch (request.url.path) {
+              case '/auth/login':
+                return http.Response(
+                  jsonEncode(<String, String>{
+                    'access_token': 'access-1',
+                    'refresh_token': 'refresh-1',
+                  }),
+                  200,
+                );
+              case '/auth/me':
+                expect(request.headers['authorization'], 'Bearer access-1');
+                return http.Response(
+                  jsonEncode(<String, Object>{
+                    'id': 7,
+                    'email': 'asha@billo.app',
+                  }),
+                  200,
+                );
+              default:
+                return http.Response('{"detail":"not found"}', 404);
+            }
+          }),
+        ),
+      ),
+      tokens: tokens,
+    );
+
+    await tester.pumpWidget(
+      BillScannerApp(dependencies: AppDependencies(authRepository: repository)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(inPage(WelcomePage, find.text('Sign In')));
+    await tester.pumpAndSettle();
+
+    final Finder fields = inPage(SignInPage, find.byType(TextFormField));
+    await tester.enterText(fields.first, 'asha@billo.app');
+    await tester.enterText(fields.last, 'secret123');
+    await tester.tap(inPage(SignInPage, find.text('Sign In')));
+    await tester.pumpAndSettle();
+
+    expect(
+      inPage(HomePage, find.text('Your spending,\nat a glance.')),
+      findsOneWidget,
+    );
+    expect(tokens.hasSession, isTrue);
   });
 
   testWidgets('register requires terms and a strong password', (
@@ -179,8 +283,10 @@ void main() {
 
     expect(inPage(BillsPage, find.text('YOUR RECORDS')), findsOneWidget);
     expect(inPage(BillsPage, find.text('₹680.00')), findsNWidgets(2));
-    expect(inPage(BillsPage, find.text('1 bill saved this month')),
-        findsOneWidget);
+    expect(
+      inPage(BillsPage, find.text('1 bill saved this month')),
+      findsOneWidget,
+    );
     expect(inPage(BillsPage, find.text('Asha Tiffins')), findsOneWidget);
 
     final Finder search = inPage(BillsPage, find.byType(TextField));
@@ -229,9 +335,16 @@ void main() {
     expect(find.text('Turn on your camera.'), findsOneWidget);
     expect(find.text('01 / 02'), findsOneWidget);
 
-    await tester.tap(find.text('Allow camera'));
+    // Access was granted on open: the preview fills the frame and the
+    // capture button is live.
+    expect(find.byIcon(Icons.videocam_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.camera_alt), findsOneWidget);
+    expect(find.text('CAPTURE'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.camera_alt));
     await tester.pump(const Duration(milliseconds: 16));
     expect(find.text('Reading your bill…'), findsOneWidget);
+    expect(find.text('Sending the photo to the scanner.'), findsOneWidget);
     expect(find.text('02 / 02'), findsOneWidget);
 
     await tester.pumpAndSettle();
@@ -248,6 +361,43 @@ void main() {
     expect(find.text('Bill saved'), findsOneWidget);
     expect(inPage(HomePage, find.text('₹1,360.00')), findsOneWidget);
     expect(inPage(HomePage, find.text('2 bills')), findsOneWidget);
+  });
+
+  testWidgets('a refused camera explains itself and can be retried', (
+    WidgetTester tester,
+  ) async {
+    final SimulatedCameraDriver camera = SimulatedCameraDriver(
+      statusOnOpen: CameraStatus.denied,
+    );
+    await pumpApp(tester, createCamera: () => camera);
+    await continueAsGuest(tester);
+    await openAddBill(tester);
+
+    await tester.tap(find.text('Take a photo'));
+    await tester.pumpAndSettle();
+
+    expect(camera.opens, 1);
+    expect(find.text('Camera access is off'), findsOneWidget);
+    expect(
+      find.textContaining(
+        'Camera access is off. Allow it in your phone settings',
+      ),
+      findsOneWidget,
+    );
+    // No preview and no shutter until access is granted.
+    expect(find.byIcon(Icons.videocam_outlined), findsNothing);
+    expect(find.text('CAPTURE'), findsNothing);
+    expect(find.text('Allow camera'), findsOneWidget);
+
+    final Finder retry = find.text('Allow camera');
+    await tester.ensureVisible(retry);
+    await tester.pumpAndSettle();
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+
+    expect(camera.opens, 2);
+    expect(find.text('Camera access is off'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('review blocks saving an empty merchant and adds items', (
@@ -268,8 +418,10 @@ void main() {
 
     expect(find.byType(ReviewPage), findsOneWidget);
     expect(find.text('Add the shop or merchant'), findsOneWidget);
-    expect(find.text('Check the highlighted fields before saving.'),
-        findsOneWidget);
+    expect(
+      find.text('Check the highlighted fields before saving.'),
+      findsOneWidget,
+    );
 
     await tester.ensureVisible(find.text('Add item'));
     await tester.pumpAndSettle();
@@ -316,8 +468,10 @@ void main() {
     }
 
     await register('asha@billo.app');
-    expect(inPage(HomePage, find.text('Your spending,\nat a glance.')),
-        findsOneWidget);
+    expect(
+      inPage(HomePage, find.text('Your spending,\nat a glance.')),
+      findsOneWidget,
+    );
 
     await tester.tap(inPage(HomePage, find.byIcon(Icons.person_outline)));
     await tester.pumpAndSettle();
@@ -353,9 +507,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: 'bills at $size');
 
-      await tester.tap(
-        inPage(BillsPage, find.byIcon(Icons.add)),
-      );
+      await tester.tap(inPage(BillsPage, find.byIcon(Icons.add)));
       await tester.pumpAndSettle();
       expect(find.byType(AddBillPage), findsOneWidget);
       expect(tester.takeException(), isNull, reason: 'add bill at $size');

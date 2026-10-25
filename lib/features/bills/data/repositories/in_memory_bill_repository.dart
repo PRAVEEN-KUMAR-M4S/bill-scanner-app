@@ -1,4 +1,5 @@
 import '../../domain/entities/bill.dart';
+import '../../domain/entities/bill_extraction.dart';
 import '../../domain/repositories/bill_repository.dart';
 import '../sample_bill.dart';
 
@@ -12,9 +13,7 @@ class InMemoryBillRepository implements BillRepository {
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now {
     final Bill sample = buildSampleBill(_now());
-    _bills.add(
-      sample.copyWith(id: 'bill-demo', isSample: false),
-    );
+    _bills.add(sample.copyWith(id: 'bill-demo', isSample: false));
   }
 
   /// Simulated round-trip time.
@@ -27,6 +26,16 @@ class InMemoryBillRepository implements BillRepository {
   Future<List<Bill>> fetchBills() async {
     await Future<void>.delayed(latency);
     return List<Bill>.unmodifiable(_bills);
+  }
+
+  @override
+  Future<BillExtraction> extract({
+    required List<int> bytes,
+    required String filename,
+    required String contentType,
+  }) async {
+    await Future<void>.delayed(latency);
+    return BillExtraction(bill: buildSampleBill(_now()));
   }
 
   @override

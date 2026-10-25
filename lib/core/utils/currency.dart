@@ -22,10 +22,7 @@ abstract final class Currency {
 
   /// Parses a user-entered amount, tolerating spaces, commas and a `₹` prefix.
   static double? parse(String value) {
-    final String cleaned = value
-        .replaceAll('₹', '')
-        .replaceAll(',', '')
-        .trim();
+    final String cleaned = value.replaceAll('₹', '').replaceAll(',', '').trim();
     if (cleaned.isEmpty) return null;
     return double.tryParse(cleaned);
   }

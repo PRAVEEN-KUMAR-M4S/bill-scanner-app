@@ -14,4 +14,10 @@ abstract interface class AuthRepository {
   Future<AppUser> signInWithProvider(AuthProvider provider);
 
   Future<AppUser> continueAsGuest();
+
+  /// The account saved on this device, or `null` when nobody is signed in.
+  Future<AppUser?> restoreSession();
+
+  /// Ends the session locally and, when the backend is involved, revokes it.
+  Future<void> signOut();
 }

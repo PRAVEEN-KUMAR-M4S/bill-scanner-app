@@ -46,21 +46,14 @@ class _AppShellState extends State<AppShell> {
           const BillsPage(),
         ],
       ),
-      bottomNavigationBar: AppBottomNav(
-        index: _index,
-        onChanged: _select,
-      ),
+      bottomNavigationBar: AppBottomNav(index: _index, onChanged: _select),
     );
   }
 }
 
 /// Bottom tab bar: cream surface, inked hairline, accent for the active tab.
 class AppBottomNav extends StatelessWidget {
-  const AppBottomNav({
-    super.key,
-    required this.index,
-    required this.onChanged,
-  });
+  const AppBottomNav({super.key, required this.index, required this.onChanged});
 
   final int index;
   final ValueChanged<int> onChanged;

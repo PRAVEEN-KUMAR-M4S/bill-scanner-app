@@ -15,8 +15,8 @@ Bill buildSampleBill(DateTime now) {
     total: 680,
     category: BillCategory.foodAndDrink,
     items: const <BillItem>[
-      BillItem(name: 'Tiffin special', quantity: 1, priceEach: 340),
-      BillItem(name: 'Masala chai', quantity: 1, priceEach: 340),
+      BillItem(name: 'Tiffin special', quantity: 1, amount: 340),
+      BillItem(name: 'Masala chai', quantity: 1, amount: 340),
     ],
     isSample: true,
   );

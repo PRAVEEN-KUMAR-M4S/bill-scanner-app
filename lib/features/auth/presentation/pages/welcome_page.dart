@@ -27,8 +27,8 @@ class WelcomePage extends StatelessWidget {
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             // Scrolls on short phones; stays vertically centered on tall ones.
-            final double minHeight =
-                (constraints.maxHeight - AppSpacing.xxl).clamp(0, double.infinity);
+            final double minHeight = (constraints.maxHeight - AppSpacing.xxl)
+                .clamp(0, double.infinity);
 
             return SingleChildScrollView(
               padding: const EdgeInsets.symmetric(
@@ -60,8 +60,9 @@ class WelcomePage extends StatelessWidget {
                                 PaperButton(
                                   label: 'Sign In',
                                   isLoading: isLoading,
-                                  onPressed: () => Navigator.of(context)
-                                      .pushNamed(SignInPage.routeName),
+                                  onPressed: () => Navigator.of(
+                                    context,
+                                  ).pushNamed(SignInPage.routeName),
                                 ),
                                 const SizedBox(height: AppSpacing.md),
                                 PaperButton(
@@ -69,8 +70,9 @@ class WelcomePage extends StatelessWidget {
                                   variant: PaperButtonVariant.secondary,
                                   onPressed: isLoading
                                       ? null
-                                      : () => Navigator.of(context)
-                                          .pushNamed(RegisterPage.routeName),
+                                      : () => Navigator.of(
+                                          context,
+                                        ).pushNamed(RegisterPage.routeName),
                                 ),
                               ],
                             );
@@ -207,7 +209,8 @@ class _GuestEntry extends StatelessWidget {
     return GestureDetector(
       onTap: isLoading
           ? null
-          : () => context.read<AuthBloc>().add(const AuthGuestSignInRequested()),
+          : () =>
+                context.read<AuthBloc>().add(const AuthGuestSignInRequested()),
       behavior: HitTestBehavior.opaque,
       child: const Padding(
         padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),

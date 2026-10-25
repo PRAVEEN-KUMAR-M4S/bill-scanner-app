@@ -8,13 +8,25 @@ import 'app_text_styles.dart';
 abstract final class AppTheme {
   static ThemeData light() {
     final TextTheme textTheme = TextTheme(
-      displayLarge: AppFonts.display(size: 34, weight: FontWeight.w800, height: 1.05),
-      headlineMedium: AppFonts.display(size: 26, weight: FontWeight.w800, height: 1.05),
+      displayLarge: AppFonts.display(
+        size: 34,
+        weight: FontWeight.w800,
+        height: 1.05,
+      ),
+      headlineMedium: AppFonts.display(
+        size: 26,
+        weight: FontWeight.w800,
+        height: 1.05,
+      ),
       titleLarge: AppFonts.display(size: 20, weight: FontWeight.w700),
       titleMedium: AppFonts.display(size: 15, weight: FontWeight.w700),
       bodyLarge: AppFonts.display(size: 16),
       bodyMedium: AppFonts.display(size: 14),
-      bodySmall: AppFonts.display(size: 13, weight: FontWeight.w500, color: AppColors.inkMuted),
+      bodySmall: AppFonts.display(
+        size: 13,
+        weight: FontWeight.w500,
+        color: AppColors.inkMuted,
+      ),
       labelSmall: AppFonts.label(),
     );
 

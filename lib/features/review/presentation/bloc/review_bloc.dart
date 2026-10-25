@@ -1,21 +1,26 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../bills/domain/entities/bill.dart';
+import '../../../bills/domain/entities/bill_problem.dart';
+import '../../../bills/domain/failures/bill_failure.dart';
 import '../../../bills/domain/usecases/save_bill.dart';
 import 'review_event.dart';
 import 'review_state.dart';
 
 class ReviewBloc extends Bloc<ReviewEvent, ReviewState> {
-  ReviewBloc({required Bill bill, required SaveBill saveBill})
-    : _saveBill = saveBill,
-      super(ReviewEditing.fromBill(bill)) {
+  ReviewBloc({
+    required Bill bill,
+    required SaveBill saveBill,
+    List<BillProblem> problems = const <BillProblem>[],
+  }) : _saveBill = saveBill,
+       super(ReviewEditing.fromBill(bill, problems: problems)) {
     on<ReviewMerchantChanged>(_onMerchantChanged);
     on<ReviewDateChanged>(_onDateChanged);
     on<ReviewTotalChanged>(_onTotalChanged);
     on<ReviewCategoryChanged>(_onCategoryChanged);
     on<ReviewItemNameChanged>(_onItemNameChanged);
     on<ReviewItemQuantityChanged>(_onItemQuantityChanged);
-    on<ReviewItemPriceChanged>(_onItemPriceChanged);
+    on<ReviewItemAmountChanged>(_onItemAmountChanged);
     on<ReviewItemAdded>(_onItemAdded);
     on<ReviewItemRemoved>(_onItemRemoved);
     on<ReviewSubmitted>(_onSubmitted);
@@ -76,14 +81,14 @@ class ReviewBloc extends Bloc<ReviewEvent, ReviewState> {
     );
   }
 
-  void _onItemPriceChanged(
-    ReviewItemPriceChanged event,
+  void _onItemAmountChanged(
+    ReviewItemAmountChanged event,
     Emitter<ReviewState> emit,
   ) {
     _updateItem(
       emit,
       event.index,
-      (item) => item.copyWith(priceText: event.value),
+      (item) => item.copyWith(amountText: event.value),
     );
   }
 
@@ -119,7 +124,7 @@ class ReviewBloc extends Bloc<ReviewEvent, ReviewState> {
             id: nextId,
             name: '',
             quantityText: '1',
-            priceText: '',
+            amountText: '',
           ),
         ],
       ),
@@ -128,7 +133,9 @@ class ReviewBloc extends Bloc<ReviewEvent, ReviewState> {
 
   void _onItemRemoved(ReviewItemRemoved event, Emitter<ReviewState> emit) {
     final ReviewEditing? editing = _editing;
-    if (editing == null || event.index < 0 || event.index >= editing.items.length) {
+    if (editing == null ||
+        event.index < 0 ||
+        event.index >= editing.items.length) {
       return;
     }
 
@@ -149,16 +156,18 @@ class ReviewBloc extends Bloc<ReviewEvent, ReviewState> {
       return;
     }
 
-    emit(
-      editing.copyWith(
-        isSaving: true,
-        submitted: true,
-        clearFailure: true,
-      ),
-    );
+    emit(editing.copyWith(isSaving: true, submitted: true, clearFailure: true));
     try {
       final Bill saved = await _saveBill(editing.toBill());
       emit(ReviewSaved(saved));
+    } on BillFailure catch (failure) {
+      emit(
+        editing.copyWith(
+          isSaving: false,
+          failureMessage: failure.message,
+          problems: failure.problems,
+        ),
+      );
     } on Exception {
       emit(
         editing.copyWith(

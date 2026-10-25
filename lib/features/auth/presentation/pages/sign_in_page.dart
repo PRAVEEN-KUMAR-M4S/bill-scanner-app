@@ -40,11 +40,8 @@ class _SignInPageState extends State<SignInPage> {
   void _submit() {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     context.read<AuthBloc>().add(
-          AuthSignInRequested(
-            email: _email.text.trim(),
-            password: _password.text,
-          ),
-        );
+      AuthSignInRequested(email: _email.text.trim(), password: _password.text),
+    );
   }
 
   @override
@@ -88,12 +85,16 @@ class _SignInPageState extends State<SignInPage> {
                   obscureText: true,
                   textInputAction: TextInputAction.done,
                   autofillHints: const <String>[AutofillHints.password],
-                  validator: (String? value) =>
-                      FormValidators.required(value, message: 'Password is required'),
+                  validator: (String? value) => FormValidators.required(
+                    value,
+                    message: 'Password is required',
+                  ),
                   onFieldSubmitted: (_) => _submit(),
                   labelTrailing: GestureDetector(
                     onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Password reset is coming soon.')),
+                      const SnackBar(
+                        content: Text('Password reset is coming soon.'),
+                      ),
                     ),
                     child: const SectionLabel(
                       'Forgot?',
@@ -121,10 +122,10 @@ class _SignInPageState extends State<SignInPage> {
                         onPressed: isLoading
                             ? null
                             : () => context.read<AuthBloc>().add(
-                                  const AuthProviderSignInRequested(
-                                    AuthProvider.google,
-                                  ),
+                                const AuthProviderSignInRequested(
+                                  AuthProvider.google,
                                 ),
+                              ),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
@@ -136,10 +137,10 @@ class _SignInPageState extends State<SignInPage> {
                         onPressed: isLoading
                             ? null
                             : () => context.read<AuthBloc>().add(
-                                  const AuthProviderSignInRequested(
-                                    AuthProvider.apple,
-                                  ),
+                                const AuthProviderSignInRequested(
+                                  AuthProvider.apple,
                                 ),
+                              ),
                       ),
                     ),
                   ],
