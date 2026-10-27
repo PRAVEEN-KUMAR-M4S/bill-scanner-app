@@ -16,10 +16,12 @@ debugging stories that make the project sound like work rather than a tutorial.
 > through one reusable `ApiService` with multipart support and typed errors; the
 > JWT pair is restored from SharedPreferences on launch. The five post-login
 > screens come from design exports, with a token-based design system, shared
-> paper components, and layouts verified from 320-pixel phones up to tablets. It
-> has 69 tests — 15 widget paths and 54 unit tests (network, data and the
-> scan bloc) — and the
-> analyzer is clean."
+> paper components, and layouts verified from 320-pixel phones up to tablets.
+> Bills are offline-first: SQLite caches the last list, and a save made without
+> a connection waits in an upload queue and syncs on the next successful load.
+> It has 91 tests — 19 widget paths and 72 unit tests (network, data, SQLite
+> schema/queries, the offline queue and the scan bloc) — and the analyzer is
+> clean."
 
 ---
 
@@ -46,8 +48,8 @@ debugging stories that make the project sound like work rather than a tutorial.
    totals, and save. On success `ReviewSaved` triggers a bills reload, a snack
    bar and a pop to the shell.
 7. **Quality** — 13 shared design-system widgets, design tokens instead of
-   hardcoded values, responsive patterns, 69 tests (15 widget + 54 unit)
-   and zero analyzer issues.
+   hardcoded values, responsive patterns, 91 tests (19 widget + 72 unit,
+   including real SQLite) and zero analyzer issues.
 
 ---
 
@@ -187,15 +189,49 @@ tap → event → bloc → use case → repository (interface)
 > with `MockClient` tests for every status branch. All paths live in
 > `ApiEndpoints`; `BillMapper` owns the JSON rules (rupees as strings, ISO
 > dates, ten category slugs, whole-line amounts). Swapping a repository is one
-> line in `AppDependencies`; pages and blocs stay untouched. For offline
-> support, wrap the remote bills repository in a caching decorator.
+> line in `AppDependencies`; pages and blocs stay untouched. That is exactly how
+> offline support landed: `OfflineBillRepository` wraps the API repository, so
+> no bloc, page or use case changed.
 
 **Q: How does persistence work?**
-> The session (tokens + profile) is written through `SessionStorage` to
-> SharedPreferences and restored before `runApp`; tests use the in-memory
-> implementation. Bills live on the server. For offline bills, add a
-> `LocalBillRepository` decorator behind the same interface and inject it in
-> `AppDependencies`.
+> Two stores for two jobs. The session (tokens + profile) goes through
+> `SessionStorage` to SharedPreferences and is restored before `runApp`; tests
+> use the in-memory implementation. Bills go to SQLite through
+> `BillLocalStore`: `SqliteBillStore` on mobile, `MemoryBillStore` in tests and
+> on web/desktop. Each row is partitioned by `owner_id`, so two accounts on one
+> phone never share a cache.
+
+**Q: Walk me through an offline save.**
+> Review dispatches `SaveBill` → `OfflineBillRepository.save` →
+> `POST /bills/confirm`. A connection or timeout failure becomes
+> `BillFailure.offline`; the repository stores the bill with a `local-…` id and
+> `sync_status = 'pending'` and returns it as saved. The review screen sees
+> `isPendingSync` and says "Saved on this phone. It will sync when you are back
+> online." The bills list shows a "Pending sync" badge and a banner. On the next
+> successful `fetchBills`, the queue is sent oldest first, each server row
+> replaces its local row in one transaction, then `GET /bills` refreshes the
+> cache.
+
+**Q: Why not queue every failed save?**
+> A 422 is deterministic — the backend will reject the same draft forever. Only
+> connection failures are retried automatically; a validation failure stays on
+> the review form with the server's problem messages. A queued bill that the
+> server later rejects stays queued and visible rather than disappearing.
+
+**Q: How do you test SQL without a device?**
+> `sqflite_common_ffi` opens a real in-memory SQLite database in a Dart VM test
+> with the production schema (`BillDatabase.open(factory: databaseFactoryFfi)`).
+> The ten tests cover create statements/indexes, ordering, owner partitioning,
+> the pending filter, refresh-keeps-queue, cascade on promotion, reopening a
+> closed file and item replacement. `docs/SQL_GUIDE.md` is the write-up and practice book for those
+> queries.
+
+**Q: What is the offline design's weak spot?**
+> `POST /bills/confirm` has no idempotency key. If the request reached the server
+> but the response was lost, the retry can create a duplicate. The fix is a
+> client `request_id` with a unique index on the server; the app already has a
+> stable local id it could send. I would also move the flush into a background
+> task so it does not wait for the app to open.
 
 **Q: Why keep the sample bill in two repositories?**
 > It does not: `buildSampleBill(now)` in `features/bills/data` is the single
@@ -209,11 +245,12 @@ tap → event → bloc → use case → repository (interface)
 > persisted bill.
 
 **Q: JSON/serialization?**
-> Auth has it now: `AuthTokens` and `ApiUser` parse the five responses in the
-> data layer, so domain entities never see transport shapes. The bill endpoints
-> do not have a list yet, so bills still have no JSON mapper; when they do, a
-> `BillJson` mapper belongs in `features/bills/data`. Three small classes do not
-> justify `json_serializable` yet.
+> Both features have handwritten mappers in data: `AuthTokens`/`ApiUser` for the
+> five auth responses and `BillMapper` for the three bill routes. Domain entities
+> never see transport shapes. A row mapper (`BillRowMapper`) does the same for
+> SQLite, so a column rename never leaks above the data layer. At this size,
+> `json_serializable`/`build_runner` would add a build step without removing
+> much code.
 
 ### UI, design and responsiveness
 
@@ -540,14 +577,15 @@ rewriting one file and its tests, not every data source.
 | Post-login screens | 5 |
 | Auth screens | 3 |
 | Features | 5 (`auth`, `bills`, `home`, `scan`, `review`) |
-| Dart files in `lib` | 80 |
-| Lines in `lib` | ≈ 7,035 |
-| Shared widgets | 13 |
-| Widget tests | 13 |
-| Network/auth unit tests | 23 |
-| Total tests | 36 (all passing) |
+| Dart files in `lib` | 110 |
+| Lines in `lib` | ≈ 10,280 |
+| Shared widgets (core) | 13 |
+| Widget tests | 19 |
+| Unit tests | 72 |
+| Total tests | 91 (all passing) |
+| SQLite tables / indexes | 2 / 3 |
 | Analyzer issues | 0 |
-| Integrated API endpoints | 5 auth (register, login, refresh, logout, me) |
+| Integrated API endpoints | 8 (5 auth, 3 bills) |
 | Design tokens | 12 colours, 6 spacings, 5 radii, 3 strokes, 2 shadows |
 | Responsive widths verified | 320×568, 390×844, 800×1000 |
 | Test latencies | bills 0 ms in widget tests, scan 120 ms (production is real HTTP) |
@@ -556,17 +594,16 @@ rewriting one file and its tests, not every data source.
 
 ## 10. What I would improve next (priority order)
 
-1. **Offline bill cache** — a `LocalBillRepository` decorator so the dashboard
-   still renders without the API; no UI changes.
+1. **Idempotent sync** — send a `request_id` with `/bills/confirm` and add a
+   unique index on the server, so a lost response cannot become a duplicate.
+   Then move the flush to a background task (WorkManager / BGTaskScheduler).
 2. **Secure sessions** — Keychain/Keystore token storage and automatic
    401 → refresh → retry (the repository already rotates the pair).
-3. **Camera preview** — replace the file picker with a live `camera` preview;
-   extraction and failure UX already exist.
-4. **Bloc unit tests** with `bloc_test` for the full validation/filtering
+3. **Bloc unit tests** with `bloc_test` for the full validation/filtering
    matrices.
-5. **Accessibility pass** — fix duplicate semantics labels, raise active-tab
+4. **Accessibility pass** — fix duplicate semantics labels, raise active-tab
    contrast, test text scaling at 2.0.
-6. **Design polish** — measurement against the 412-px exports, tablet
+5. **Design polish** — measurement against the 412-px exports, tablet
    two-column layouts, exact chart presentation with a demo clock.
 6. **Localisation** — `intl`, currency/locale, extracted strings.
 7. **CI** — `flutter analyze`, `flutter test`, format check on every push.
@@ -593,6 +630,10 @@ rewriting one file and its tests, not every data source.
 - [ ] Say the 30-second pitch out loud.
 - [ ] Explain why BillsBloc lives above both tabs.
 - [ ] Explain the review validation getters and one-shot `ReviewSaved`.
+- [ ] Walk the offline save: queue → pending badge → flush → promote.
+- [ ] Explain the two-table schema, why `owner_id` is on every query, and why
+      only connection failures are queued.
+- [ ] Say what you would fix first: a server-side idempotency key.
 - [ ] Explain how a save reaches the dashboard (`BillsReloaded` + shared repo).
 - [ ] Name three responsive techniques and the widths you verified.
 - [ ] Name the five promoted shared widgets and why.

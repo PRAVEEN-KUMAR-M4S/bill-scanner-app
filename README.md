@@ -3,7 +3,8 @@
 A Flutter expense app built from a paper-collage UX Pilot design: sign in,
 photograph a bill, check what the scanner read, and confirm it. Auth, the bill
 list, photo extraction and confirmation all talk to the Bill Reader FastAPI
-backend; the session survives an app restart.
+backend; the session survives an app restart, and bills are cached on the phone
+so the dashboard opens offline and saves wait in an upload queue.
 
 | | |
 |---|---|
@@ -11,10 +12,11 @@ backend; the session survives an app restart.
 | **State** | `flutter_bloc` 9, sealed events/states, `equatable` |
 | **API** | One reusable `ApiService` (GET/POST/PUT/DELETE + multipart, JSON, bearer auth, typed errors) and one central `ApiEndpoints` list |
 | **Session** | Access + refresh tokens and the profile persisted in SharedPreferences; restored on launch |
+| **Offline** | sqflite cache + write-behind upload queue; cached reads and queued saves survive restart |
 | **Design system** | Token-driven colours, spacing, radii, shadows and typography; 13 shared widgets |
 | **Responsive** | Verified at 320×568, 390×844 and 800×1000 |
 | **Camera** | In-app preview: permission → preview → shutter → API, with a loader; a simulated driver keeps tests off the plugin |
-| **Quality** | `flutter analyze` clean, 69 tests passing |
+| **Quality** | `flutter analyze` clean, 91 tests passing |
 
 ## Screens
 
@@ -59,7 +61,7 @@ See **[Running on a real Android phone](docs/ANDROID_DEVICE.md)** for the full
 checklist, first-run tests and troubleshooting.
 
 ```bash
-flutter test      # 69 tests
+flutter test      # 91 tests, including real in-memory SQLite
 flutter analyze
 ```
 
@@ -72,6 +74,9 @@ flutter analyze
 - **[Interview notes](docs/INTERVIEW_NOTES.md)** — pitches, trade-offs, likely
   questions with answers, code snippets, debugging stories and a revision
   checklist.
+- **[SQL guide](docs/SQL_GUIDE.md)** — the offline cache explained from first
+  principles: schema, every query, indexes, transactions, migrations, practice
+  tasks with solutions, and the interview Q&A it prepares.
 - **[Android device guide](docs/ANDROID_DEVICE.md)** — USB port forwarding and
   Wi-Fi setup, build types, first-run checks and troubleshooting.
 
@@ -85,7 +90,8 @@ lib/
 │   ├── di/ theme/ navigation/ utils/ widgets/
 └── features/
     ├── auth/                  # welcome, sign in, register, persisted API session
-    ├── bills/                 # entities, BillApi, API/in-memory repositories, list
+    ├── bills/                 # entities, BillApi, SQLite cache, offline/queued
+    │                          # repositories, list + sync banner
     ├── home/                  # spending dashboard
     ├── scan/                  # camera preview + shutter, extraction, add bill
     └── review/                # editable review form + confirm
@@ -105,6 +111,12 @@ lib/
   live preview in the frame, and the shutter hands the bytes to
   `POST /bills/extract` behind a loader. A `CameraDriver` abstraction keeps the
   plugin out of the bloc and lets tests inject a simulated camera.
+- **Offline is real.** `GET /bills` is cached in SQLite on Android, iOS and
+  macOS (web and desktop previews fall back to an in-memory store); if the
+  server is unreachable the dashboard shows the cache with an offline banner. A
+  bill confirmed while offline is stored with a `local-…` id and a `Pending
+  sync` badge, then pushed to `/bills/confirm` on the next successful load. Only
+  connection failures queue — a 422 stays on the review form.
 - **Money is the printed line amount.** `items[].amount` is the whole line in
   rupees, never a unit price multiplied by quantity.
 - **Categories** are the backend's ten fixed slugs; unknown values fall back to
