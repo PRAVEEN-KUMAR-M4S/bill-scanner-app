@@ -32,10 +32,10 @@ yet.
   container (tests use fakes and a mock HTTP client).
 - **Network:** paths live only in `ApiEndpoints`; a single `ApiService` owns
   GET/POST/PUT/DELETE plus multipart uploads, JSON, bearer headers, timeouts and
-  typed errors. `AuthApi` and `BillApi` are the only sources that know fields.
+  typed errors. `AuthRemoteDataSource` and `BillRemoteDataSource` are the only sources that know fields.
 - **Offline:** bills are cached in SQLite (`sqflite`) under an owner id; a save
   made without a connection is queued and flushed on the next successful load.
-  The cache sits behind `OfflineBillRepository`, so no bloc or page knows it
+  The cache sits behind `BillRepositoryImpl`, so no bloc or page knows it
   exists. Every query is explained in
   [`SQL_GUIDE.md`](SQL_GUIDE.md).
 - **Responsiveness:** every page scrolls, content is capped at 560 logical
@@ -143,7 +143,7 @@ Small-phone dashboard:
 **Why no code generation (freezed/json_serializable)?** The state shapes are
 small and handwritten `copyWith`/`props` are easy to read. `equatable` gives the
 equality BLoC needs without a build step. The API surface is two small mapper
-files (`AuthTokens`/`ApiUser` and `BillMapper`), so handwritten JSON is smaller
+files (`AuthTokens`/`UserModel` and `BillMapper`), so handwritten JSON is smaller
 than adding `build_runner`. Revisit if the API grows many more shapes.
 
 **Why `http` instead of Dio?** The needs are four verbs, JSON, one bearer
@@ -175,7 +175,7 @@ flutter analyze
 Current verified state:
 
 - `flutter analyze` → **No issues found!** (exit code 0)
-- `flutter test` → **91/91 tests passed** (exit code 0), including the SQLite
+- `flutter test` → **94/94 tests passed** (exit code 0), including the SQLite
   schema/queries against a real in-memory database
 - The offline flow was exercised without a network: a cached list renders with
   the offline banner, and a bill saved while offline is queued, badged and
@@ -200,7 +200,7 @@ Notes:
   for the picker; Android needs no extra permission for the picker intents.
 - The token pair and profile are in SharedPreferences, so a restart reopens the
   dashboard. This is persistence, not a secure vault: swap
-  `SharedPreferencesSessionStorage` for `flutter_secure_storage` without
+  `SharedPreferencesAuthSessionStorage` for `flutter_secure_storage` without
   touching the feature above it.
 
 ---
@@ -250,15 +250,15 @@ lib/
 └── features/
     ├── auth/
     │   ├── domain/
-    │   │   ├── entities/         # AppUser, AuthProvider
+    │   │   ├── entities/         # User, AuthProvider
     │   │   ├── failures/         # AuthFailure
     │   │   ├── repositories/     # AuthRepository (contract)
     │   │   └── usecases/         # SignIn, Register, ProviderSignIn, Guest, SignOut
     │   ├── data/
-    │   │   ├── datasources/      # AuthApi (the five endpoints)
-    │   │   ├── models/           # AuthTokens, ApiUser
-    │   │   ├── session/          # AuthTokenStore + SharedPreferences storage
-    │   │   └── repositories/     # ApiAuthRepository, InMemoryAuthRepository
+    │   │   ├── datasources/      # AuthRemoteDataSource (the five endpoints)
+    │   │   ├── models/           # AuthTokens, UserModel
+    │   │   ├── session/          # AuthSessionStore + SharedPreferences storage
+    │   │   └── repositories/     # AuthRepositoryImpl, FakeAuthRepository
     │   └── presentation/
     │       ├── bloc/             # AuthBloc + sealed events/states
     │       ├── pages/            # Welcome, SignIn, Register
@@ -270,9 +270,9 @@ lib/
     │   │   │                     # BillsSnapshot
     │   │   ├── failures/         # BillFailure (problems + isOffline)
     │   │   ├── repositories/     # BillRepository (list + confirm + extract)
-    │   │   └── usecases/         # FetchBills, SaveBill, ExtractBill
+    │   │   └── usecases/         # FetchBills, SaveBill
     │   ├── data/
-    │   │   ├── datasources/      # BillApi (three endpoints)
+    │   │   ├── datasources/      # BillRemoteDataSource (three endpoints)
     │   │   ├── local/            # the offline cache: SQL catalogue, database,
     │   │   │                     # row mapper, SQLite + memory stores
     │   │   ├── models/           # BillMapper (JSON ⇄ domain)
@@ -292,7 +292,7 @@ lib/
     │   │   ├── repositories/     # ScanRepository
     │   │   └── usecases/         # CaptureBill
     │   ├── data/
-    │   │   └── repositories/     # ApiScanRepository, SimulatedScanRepository
+    │   │   └── repositories/     # ScanRepositoryImpl, ScanRepositoryImpl
     │   └── presentation/
     │       ├── bloc/             # ScanBloc + events/states
     │       ├── pages/            # AddBillPage, ScanPage
@@ -337,7 +337,7 @@ Read the project in this order; each step only depends on earlier ones.
 | 4 | `lib/core/theme/*` | Tokens first: colours → dimensions → type → theme |
 | 5 | `lib/core/widgets/page_scaffold.dart` | The responsive frame every page reuses |
 | 6 | `lib/features/auth/domain/**` | Entity → failure → repository contract → five use cases |
-| 7 | `lib/features/auth/data/**` | `AuthApi` → `ApiAuthRepository`; token storage and error translation |
+| 7 | `lib/features/auth/data/**` | `AuthRemoteDataSource` → `AuthRepositoryImpl`; token storage and error translation |
 | 8 | `lib/features/auth/presentation/bloc/**` | Event/state design and the shared `_run` helper |
 | 9 | `lib/app.dart` | Route table, `onGenerateRoute`, auth listener, bloc ownership |
 | 10 | `lib/core/navigation/app_shell.dart` + `home` + `bills` | Tabs, shared `BillsBloc`, dashboard/list composition |
@@ -366,7 +366,7 @@ editing state (raw text, validation) genuinely belongs to presentation.
 | Layer | Contains | Must not contain | Example |
 |---|---|---|---|
 | Domain | entities, repository interfaces, use cases, failures | Flutter imports, HTTP, storage | `Bill`, `BillRepository`, `SaveBill` |
-| Data | repository implementations, API clients/models, sample data | widgets, blocs | `ApiAuthRepository`, `InMemoryBillRepository` |
+| Data | repository implementations, API clients/models, sample data | widgets, blocs | `AuthRepositoryImpl`, `FakeBillRepository` |
 | Presentation | blocs, pages, feature widgets | direct repository access | `BillsBloc`, `BillsPage` |
 
 ### 5.2 Anatomy of a feature (the pattern every feature follows)
@@ -395,7 +395,7 @@ Concrete example (saving a bill):
 2. `ReviewBloc` validates `ReviewEditing`, emits `isSaving: true`, then calls
    `_saveBill(editing.toBill())`.
 3. `SaveBill` calls `BillRepository.save`.
-4. `InMemoryBillRepository` assigns an id, stores the bill, returns it.
+4. `FakeBillRepository` assigns an id, stores the bill, returns it.
 5. `ReviewBloc` emits `ReviewSaved(saved)`.
 6. `ReviewPage`'s `BlocConsumer` listener triggers `BillsReloaded`, shows the
    "Bill saved" snack bar, and pops back to the shell.
@@ -430,20 +430,20 @@ final class AppDependencies {
   /// Production: open SharedPreferences, restore the session, use the API.
   static Future<AppDependencies> create() async {
     final prefs = await SharedPreferences.getInstance();
-    final tokens = AuthTokenStore(
-      storage: SharedPreferencesSessionStorage(prefs),
+    final tokens = AuthSessionStore(
+      storage: SharedPreferencesAuthSessionStorage(prefs),
     );
     await tokens.restore();
 
     final api = _apiFor(tokens);
-    final auth = ApiAuthRepository(authApi: AuthApi(api), tokens: tokens);
+    final auth = AuthRepositoryImpl(authApi: AuthRemoteDataSource(api), tokens: tokens);
     final user = await auth.restoreSession();
-    final bills = ApiBillRepository(billApi: BillApi(api));
+    final bills = BillRepositoryImpl(billApi: BillRemoteDataSource(api));
 
     return AppDependencies._(
       authRepository: auth,
       billRepository: bills,
-      scanRepository: ApiScanRepository(billRepository: bills),
+      scanRepository: ScanRepositoryImpl(billRepository: bills),
       restoredUser: user,
     );
   }
@@ -453,7 +453,7 @@ final class AppDependencies {
     AuthRepository? authRepository,
     BillRepository? billRepository,
     ScanRepository? scanRepository,
-    AppUser? restoredUser,
+    User? restoredUser,
   }) { ... }
 
   AuthBloc createAuthBloc() { ... }        // passes restoredUser
@@ -468,9 +468,9 @@ Why this shape:
 - **One composition root.** `main.dart` awaits `AppDependencies.create()`,
   which opens SharedPreferences, restores the session and wires the live API.
   Tests use the synchronous factory and inject an in-memory auth repository (or
-  an `ApiAuthRepository` with a `MockClient`) plus zero-latency bill/scan fakes.
+  an `AuthRepositoryImpl` with a `MockClient`) plus zero-latency bill/scan fakes.
 - **Shared repository instances.** The bills repository is created once and
-  injected into `FetchBills`, `SaveBill` and `ExtractBill`, so a save is
+  injected into `FetchBills` and `SaveBill`, so a save is
   immediately visible to the list and the scanner uses the same base URL/token.
 - **Blocs are created where they are owned.** Auth and Bills live for the whole
   app (`BillScannerApp` creates and disposes them); Scan and Review are scoped to
@@ -548,15 +548,15 @@ belong to that screen.
 ```
 AuthPage → AuthBloc → SignInWithEmail → AuthRepository (domain)
                                              │
-                                    ApiAuthRepository (data)
+                                    AuthRepositoryImpl (data)
                                        │             │
-                                 AuthTokenStore   AuthApi
+                                 AuthSessionStore   AuthRemoteDataSource
                                                     │
                                                 ApiService ──> FastAPI
 ```
 
 **`ApiEndpoints`** (`lib/core/network/api_endpoints.dart`) is the only place a
-URL lives. `AuthApi` and `BillApi` build from it, so a route rename is one edit
+URL lives. `AuthRemoteDataSource` and `BillRemoteDataSource` build from it, so a route rename is one edit
 and no screen or repository knows a path.
 
 **`ApiService`** (`lib/core/network/api_service.dart`) is the only class that
@@ -587,25 +587,25 @@ What it centralises:
 The 422 parser understands both FastAPI shapes: the standard `detail[]` list
 and the bill route's `detail: {message, problems: [{field, message}]}`.
 
-**`AuthApi`** knows the five auth endpoints and their JSON field names:
+**`AuthRemoteDataSource`** knows the five auth endpoints and their JSON field names:
 `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`,
 `POST /auth/logout`, `GET /auth/me`.
 
-**`ApiAuthRepository`** turns API vocabulary into domain vocabulary:
+**`AuthRepositoryImpl`** turns API vocabulary into domain vocabulary:
 
 | Situation | Result |
 |---|---|
-| login succeeds | save the pair, call `/auth/me`, return and store `AppUser` |
+| login succeeds | save the pair, call `/auth/me`, return and store `User` |
 | login 401 | clear tokens, `AuthFailure('Email or password is incorrect.')` |
 | register 409 (or 400 saying "already") | `AuthFailure('That email is already registered…')` |
 | 422 | use the server's field message (for example password length) |
 | timeout / `ClientException` | "Could not reach the server…" |
 | refresh 401 | clear tokens; the next authenticated call fails cleanly |
 
-**Token lifecycle.** `AuthTokenStore` keeps the pair and the profile in memory
+**Token lifecycle.** `AuthSessionStore` keeps the pair and the profile in memory
 for synchronous reads by `ApiService`, and writes every change through
-`SessionStorage`. Production uses `SharedPreferencesSessionStorage`; tests use
-`InMemorySessionStorage`, so no plugin is needed. `main()` awaits
+`AuthSessionStorage`. Production uses `SharedPreferencesAuthSessionStorage`; tests use
+`InMemoryAuthSessionStorage`, so no plugin is needed. `main()` awaits
 `AppDependencies.create()`, which restores the store before `runApp`, and the
 app starts on the shell when a user was restored. `refreshSession()` rotates the
 pair (the backend makes the old refresh token single-use). Sign-out clears
@@ -617,7 +617,7 @@ Registration keeps the typed name; later sign-ins turn `asha.tiffins@…` into
 "Asha Tiffins". Provider buttons have no endpoint yet and fail with a sentence
 saying so.
 
-**The bill API.** `BillApi` owns the three routes and `BillMapper` owns the
+**The bill API.** `BillRemoteDataSource` owns the three routes and `BillMapper` owns the
 JSON translation:
 
 | Call | Request | Response | Client result |
@@ -642,7 +642,7 @@ Contract details the mapper enforces:
 - **Failure translation.** 413 → photo too large, 415 → JPG/PNG only, 429 → quota
   spent, 5xx → scanner busy, offline/timeout → connection message.
 
-`InMemoryBillRepository` implements the same three methods for widget tests and
+`FakeBillRepository` implements the same three methods for widget tests and
 previews, seeding the design's sample bill.
 
 **CORS.** Browsers refuse cross-origin calls unless the API answers the
@@ -742,7 +742,7 @@ Feature-only widgets stay in the feature: `BillTile` (bills), `CaptureFrame` and
 
 **Domain**
 
-- `AppUser` — id, name, email, `isGuest`.
+- `User` — id, name, email, `isGuest`.
 - `AuthProvider` — `google`, `apple`.
 - `AuthFailure` — an exception carrying a message safe to display.
 - `AuthRepository` — `signIn`, `register`, `signInWithProvider`,
@@ -753,10 +753,10 @@ Feature-only widgets stay in the feature: `BillTile` (bills), `CaptureFrame` and
 
 **Data**
 
-`ApiAuthRepository` is the default. It composes `AuthApi` (five endpoints) with
-`AuthTokenStore`, and translates every `ApiException` into an `AuthFailure`:
+`AuthRepositoryImpl` is the default. It composes `AuthRemoteDataSource` (five endpoints) with
+`AuthSessionStore`, and translates every `ApiException` into an `AuthFailure`:
 
-- login → store the token pair → `GET /auth/me` → `AppUser`;
+- login → store the token pair → `GET /auth/me` → `User`;
 - register → `POST /auth/register` → login → `me`, keeping the typed name;
 - duplicate email, wrong password, 422 field errors, timeouts and offline all
   become readable messages;
@@ -767,10 +767,10 @@ Feature-only widgets stay in the feature: `BillTile` (bills), `CaptureFrame` and
   pair was stored); guest mode is local and saved as a profile without tokens;
 - provider buttons report that the backend does not offer them yet.
 
-`InMemoryAuthRepository` remains for tests and offline demos: 700 ms simulated
+`FakeAuthRepository` remains for tests and offline demos: 700 ms simulated
 latency, password rule, duplicate tracking, derived name and simulated social
 providers. Widget tests inject it with `Duration.zero`; the API-path widget test
-injects `ApiAuthRepository` with a `MockClient`.
+injects `AuthRepositoryImpl` with a `MockClient`.
 
 **Presentation**
 
@@ -779,7 +779,7 @@ injects `ApiAuthRepository` with a `MockClient`.
 ```dart
 Future<void> _run(
   Emitter<AuthState> emit,
-  Future<AppUser> Function() request,
+  Future<User> Function() request,
 ) async {
   emit(const AuthLoading());
   try {
@@ -863,32 +863,33 @@ came from the server, the device cache or the device only — because the UI has
 to be able to say "Offline · showing saved bills" without knowing about HTTP or
 SQLite.
 
-Production composes three implementations:
+One implementation, `BillRepositoryImpl`, owns all of it and reads the session
+at call time through `hasSession()`, so signing in or out changes behaviour
+without rebuilding the graph:
 
-- `ApiBillRepository` — the pure remote client (`BillApi` + `BillMapper`):
-  `fetchBills()` → `GET /bills`, `save(bill)` → `POST /bills/confirm`,
-  `extract(...)` → `POST /bills/extract`. A 422 becomes a `BillFailure` with
-  every `BillProblem`; a connection or timeout failure becomes
-  `BillFailure.offline`;
-- `OfflineBillRepository` — a decorator over the API repository. It flushes the
-  queue, fetches the list, rewrites the cache and answers from the cache when
-  the network is down. On save, an offline failure queues the bill locally and
-  returns it with `BillSyncState.pending`; a validation failure is rethrown;
-- `LocalBillRepository` — the guest path. It stores bills in the device database
-  under `ownerId: 'guest'`, seeds the demo bill once and refuses extraction
-  because a guest has no scanner access.
+- **signed in** — reads flush the upload queue, call `GET /bills`, rewrite the
+  cache and answer from it. A connection failure skips the network and answers
+  with `BillsSource.cache`; any other failure is rethrown. A save goes to
+  `POST /bills/confirm`; when the connection fails the bill is written as
+  `BillSyncState.pending` and returned as saved, so the review screen does not
+  lose it;
+- **guest** — nothing to upload, so bills live in the device database under
+  `ownerId: 'guest'`, the demo bill is seeded once, and extraction is refused
+  with a message that points at signing in;
+- **no local database** (web, Windows, Linux) — the cache and the queue are
+  skipped, and a guest keeps bills in memory for the run.
 
-`InMemoryBillRepository` mirrors all three for widget tests and previews: it
-seeds the sample bill (Asha Tiffins, two 340 lines, 680), returns a sample
+HTTP never leaks into the repository: `BillRemoteDataSource` owns the paths,
+the JSON and the status codes, and turns each failure into a `BillFailure` (a
+422 keeps its `BillProblem`s, a connection failure keeps `isOffline`).
+
+`FakeBillRepository` in `test/support` mirrors the contract for widget tests:
+it seeds the sample bill (Asha Tiffins, two 340 lines, 680), returns a sample
 extraction, and assigns `bill-N` ids on save. No network, no file.
 
-**Session routing.** `SessionBillRepository` and `SessionScanRepository` are
-decorators over the API and local implementations. They read
-`AuthTokenStore.hasSession` at call time: a signed-in user goes through the
-offline cache and the API, a guest stays on the device. This is why guest mode does not fail with
-"session expired" on the dashboard, and no bloc or page branches on auth.
-
-**Use cases:** `FetchBills`, `SaveBill`, `ExtractBill`.
+**Use cases:** `FetchBills` and `SaveBill`. The photo → draft call goes straight
+from the scan feature to `BillRepository.extract`, so it needs no use case of
+its own.
 
 **BLoC**
 
@@ -987,7 +988,7 @@ widget and no bloc imports the plugin:
 | Implementation | Used by | Behaviour |
 |---|---|---|
 | `PluginCameraDriver` | production | `camera` plugin: `open()` requests permission and starts the preview, `takePicture()` returns a `CapturedPhoto`, plus torch and lens switching; `CameraException` codes map to the status |
-| `SimulatedCameraDriver` | tests and previews | reports a configurable status (including `denied`), draws a stand-in preview, counts opens and captures |
+| `FakeCameraDriver` | tests and previews | reports a configurable status (including `denied`), draws a stand-in preview, counts opens and captures |
 
 `CameraStatus` is `idle → starting → live`, or `denied` / `unavailable`.
 Android declares `CAMERA` in the manifest and iOS carries
@@ -996,13 +997,13 @@ when the screen opens or the retry button is pressed.
 
 **Data**
 
-`ApiScanRepository` either picks an image with `image_picker` (`imageQuality:
+`ScanRepositoryImpl` either picks an image with `image_picker` (`imageQuality:
 90`, resized to 2400 px) or accepts a `CapturedPhoto` from the shutter, and both
 paths call `BillRepository.extract`. It keeps no copy of the photo after the
 request. The picker is injectable, so tests use an `XFile` and never start a
 plugin.
 
-`SimulatedScanRepository` waits 1200 ms and returns the bundled sample as a
+`ScanRepositoryImpl` waits 1200 ms and returns the bundled sample as a
 clean `BillExtraction`; it keeps the flow testable without a camera. Its
 `sampleBill` getter powers "Just looking around?".
 
@@ -1195,8 +1196,9 @@ add-bill route directly. Navigation does not depend on global mutable state.
 
 ### 7.7 Offline cache and sync
 
-**Files:** `lib/features/bills/data/local/**`,
-`lib/features/bills/data/repositories/offline_bill_repository.dart`
+**Files:** `lib/core/database/app_database.dart`,
+`lib/features/bills/data/models/bill_row_mapper.dart`,
+`lib/features/bills/data/repositories/bill_repository_impl.dart`
 
 **The problem.** The dashboard must open on a train, and a bill confirmed in a
 tunnel must not be lost. The app therefore keeps two things on the device:
@@ -1204,10 +1206,10 @@ tunnel must not be lost. The app therefore keeps two things on the device:
 1. a **read cache** of the last `GET /bills` response;
 2. a **write queue** of bills confirmed while the server was unreachable.
 
-**One file, one schema.** `BillDatabase` opens `bill_scan.db` with
+**One file, one schema.** `AppDatabase` opens `bill_scan.db` with
 `version: 1`. `onCreate` creates `bills` and `bill_items` plus three indexes;
 `onConfigure` sets `PRAGMA foreign_keys = ON`; `onUpgrade` is the hook for
-future versions. Every statement lives in `BillQueries`; every column name in
+future versions. Every statement lives in `AppDatabase`; every column name in
 `BillRowMapper`. The complete walkthrough, including the practice exercises, is
 **[docs/SQL_GUIDE.md](SQL_GUIDE.md)**.
 
@@ -1218,7 +1220,7 @@ printed line, with `position` for printed order and
 lines. Money is `REAL` because the app's domain uses `double`; the guide notes
 why integer paise would be better for real accounting.
 
-**Read path.** `OfflineBillRepository.fetchBills()`:
+**Read path.** `BillRepositoryImpl.fetchBills()`:
 
 1. `readPending(owner)` and re-send each queued bill with `POST /bills/confirm`;
    each success is promoted to its server id in one transaction.
@@ -1254,7 +1256,7 @@ sign-in user's queued bills are still there when they return.
 390 and 800 px.
 
 **Platforms.** sqflite exists on Android, iOS and macOS. Web and Windows/Linux
-desktop fall back to `MemoryBillStore` in `AppDependencies._openBillStore`: the
+desktop fall back to `AppDatabase` in `AppDependencies._openBillStore`: the
 offline behaviour works for the session but does not survive a restart.
 
 **Known limitations.** `POST /bills/confirm` has no idempotency key, so a
@@ -1285,8 +1287,8 @@ Email sign-in adds the network leg before the same navigation:
 
 1. `SignInPage` validates the form and sends `AuthSignInRequested`.
 2. `AuthBloc` emits `AuthLoading`; `SignInWithEmail` calls the repository.
-3. `ApiAuthRepository` posts `/auth/login`, stores the pair, calls `/auth/me`.
-4. `AuthAuthenticated(AppUser)` reaches the listener and pushes `/app`.
+3. `AuthRepositoryImpl` posts `/auth/login`, stores the pair, calls `/auth/me`.
+4. `AuthAuthenticated(User)` reaches the listener and pushes `/app`.
 5. A 401, 422, timeout or offline failure becomes `AuthError`; the listener
    shows the message and the form stays put.
 
@@ -1294,7 +1296,7 @@ Tap "Continue as guest":
 
 1. `_GuestEntry` → `AuthGuestSignInRequested`.
 2. `AuthBloc` emits `AuthLoading()` then awaits `ContinueAsGuest`.
-3. Repository returns `AppUser(isGuest: true)` after latency.
+3. Repository returns `User(isGuest: true)` after latency.
 4. `AuthAuthenticated` → app listener pushes `/app`, removing sign-in routes but
    keeping Welcome as root.
 5. `AppShell.initState` → `BillsStarted`.
@@ -1327,7 +1329,7 @@ ReviewPage (ReviewBloc seeded from the draft + problems)
 ReviewEditing.isValid? ──no──> submitted=true, inline errors
         │ yes
         ▼
-SaveBill → OfflineBillRepository.save → POST /bills/confirm
+SaveBill → BillRepositoryImpl.save → POST /bills/confirm
         ├── 2xx ────────────────> ReviewSaved(synced)
         └── connection failure ─> local row, pending ─> ReviewSaved(pending)
         ▼
@@ -1350,7 +1352,7 @@ Avatar → bottom sheet → Sign out:
 
 1. Sheet pops with `true`.
 2. `AuthSignOutRequested` → the bloc emits `AuthInitial` immediately.
-3. `SignOut` clears `AuthTokenStore` and sends `POST /auth/logout` with the old
+3. `SignOut` clears `AuthSessionStore` and sends `POST /auth/logout` with the old
    refresh token, best-effort. A network failure does not change the outcome.
 4. `Navigator.popUntil(isFirst)` → Welcome (the shell route is removed).
 5. The offline cache is partitioned by `owner_id`, so signing back in as the same
@@ -1427,7 +1429,7 @@ The app is tested at two levels, with no live server:
 
 - **Widget tests** drive the real UI and real blocs through navigation, form
   validation, bloc transitions, repository calls and the resulting screens.
-- **Unit tests** call `ApiService` and `ApiAuthRepository` directly with
+- **Unit tests** call `ApiService` and `AuthRepositoryImpl` directly with
   `package:http`'s `MockClient`, so every status branch is deterministic and
   offline.
 
@@ -1435,9 +1437,9 @@ The app is tested at two levels, with no live server:
 
 ```dart
 BillScannerApp(dependencies: AppDependencies(
-  authRepository: InMemoryAuthRepository(latency: Duration.zero),
-  billRepository: InMemoryBillRepository(latency: Duration.zero),
-  scanRepository: SimulatedScanRepository(
+  authRepository: FakeAuthRepository(latency: Duration.zero),
+  billRepository: FakeBillRepository(latency: Duration.zero),
+  scanRepository: ScanRepositoryImpl(
     latency: const Duration(milliseconds: 120),
   ),
 ));
@@ -1446,7 +1448,7 @@ BillScannerApp(dependencies: AppDependencies(
 The 120 ms scan latency is deliberate: it lets the test observe the
 `ScanScanning` state (`pump(16ms)`) before `pumpAndSettle()` reaches review.
 
-One widget test swaps the in-memory auth repository for an `ApiAuthRepository`
+One widget test swaps the in-memory auth repository for an `AuthRepositoryImpl`
 backed by `MockClient`, so the real sign-in path is exercised through the UI:
 network → token store → `/auth/me` → navigation.
 
@@ -1467,7 +1469,7 @@ network → token store → `/auth/me` → navigation.
 | 11 | registering twice reports the duplicate account | repository rule surfaced through the bloc/snackbar |
 | 12 | post-login screens fit small, normal and wide viewports | no layout exceptions on all screens at 320/390/800 |
 | 13 | review page fits the smallest viewport | review renders and scrolls at 320×568 |
-| 14 | sign in through the API reaches the dashboard | sign-in form → `ApiAuthRepository` → `/auth/login` → `/auth/me` → shell, with the bearer header asserted |
+| 14 | sign in through the API reaches the dashboard | sign-in form → `AuthRepositoryImpl` → `/auth/login` → `/auth/me` → shell, with the bearer header asserted |
 | 15 | a refused camera explains itself and can be retried | blocked copy, no preview/shutter before access, retry asks again, no exceptions |
 
 `test/offline_flow_test.dart` adds four app-level tests for the cache:
@@ -1479,7 +1481,7 @@ network → token store → `/auth/me` → navigation.
 | 18 | saving while offline queues the bill and says so | review → queue → "Saved on this phone…" → badged row on Home |
 | 19 | banner and pending badge fit small and wide screens | no overflow at 320×568, 390×844, 800×1000 |
 
-### 10.3 The 72 unit tests
+### 10.3 The 75 unit tests
 
 `test/core/network/api_service_test.dart` (12 tests):
 
@@ -1498,7 +1500,7 @@ network → token store → `/auth/me` → navigation.
 | a multipart upload sends the file part, filename, content type and bearer token |
 | 413/415 map to their exceptions and a bill 422 keeps `problems` |
 
-`test/features/auth/data/api_auth_repository_test.dart` (13 tests):
+`test/features/auth/data/auth_repository_impl_test.dart` (13 tests):
 
 | Proves |
 |---|
@@ -1512,7 +1514,7 @@ network → token store → `/auth/me` → navigation.
 | provider sign-in and guest mode never call the API |
 | a malformed success body becomes a failure instead of a crash |
 
-`test/features/auth/data/auth_token_store_test.dart` (6 tests):
+`test/features/auth/data/auth_session_store_test.dart` (6 tests):
 
 | Proves |
 |---|
@@ -1520,7 +1522,7 @@ network → token store → `/auth/me` → navigation.
 | in-memory save/restore keeps the pair and profile; guests restore without tokens |
 | clear removes everything, and an empty store starts signed out |
 
-`test/features/bills/data/bill_api_test.dart` (6 tests):
+`test/features/bills/data/bill_remote_datasource_test.dart` (7 tests):
 
 | Proves |
 |---|
@@ -1528,13 +1530,9 @@ network → token store → `/auth/me` → navigation.
 | `POST /bills/extract` sends a multipart JPG/PNG part and reads the problem list |
 | `POST /bills/confirm` sends the exact draft shape (line amounts, qty, icon) |
 | a 422 confirm keeps every server problem in `BillFailure` |
-| 413 and an offline list become readable messages |
+| 413, a 401 and an offline list become readable messages, the last as `isOffline` |
 
-`test/features/bills/data/session_bill_repository_test.dart` (3 tests) proves the
-guest/signed-in routing for list, save and extract, including a session change
-between calls.
-
-`test/features/bills/data/bill_database_test.dart` (10 tests) runs the real
+`test/core/database/app_database_test.dart` (10 tests) runs the real
 schema through `sqflite_common_ffi`:
 
 | Proves |
@@ -1549,29 +1547,34 @@ schema through `sqflite_common_ffi`:
 | a closed database file reopens with its rows intact |
 | re-saving a bill replaces its items instead of duplicating them |
 
-`test/features/bills/data/offline_bill_repository_test.dart` (6 tests):
+`test/features/bills/data/bill_repository_impl_test.dart` (12 tests) runs the
+real repository against a real in-memory SQLite database:
 
-| Proves |
-|---|
-| a cached list is served when the connection drops |
-| an offline save is queued with a `local-…` id and is visible as pending |
-| the queue is flushed on the next successful load and promoted to the server id |
-| a validation failure is rethrown, not queued |
-| a rejected queued bill stays queued while a later load succeeds |
-| cache reads follow the current owner id |
+| Group | Proves |
+|---|---|
+| signed in | a cached list is served when the connection drops |
+| | an offline save is queued with a `local-…` id and shows as pending |
+| | the queue is flushed on the next load and promoted to the server id |
+| | a validation failure is rethrown, not queued |
+| | two overlapping loads confirm one queued bill only once |
+| | a rejected queued bill stays queued while a later load succeeds |
+| | cache reads follow the current owner id |
+| guest | the demo bill is seeded once, device saves stay device-only |
+| | extraction is refused without an account |
+| | the session is read per call, so a later sign-in switches paths |
+| no database | a guest keeps bills in memory for the run |
+| | a signed-in read and save cannot fall back to a cache |
 
-`test/features/bills/data/local_bill_repository_test.dart` (2 tests) proves the
-guest seeds the demo bill once, keeps device saves, and refuses extraction.
-
-`test/features/scan/data/api_scan_repository_test.dart` (6 tests):
+`test/features/scan/data/scan_repository_impl_test.dart` (7 tests):
 
 | Proves |
 |---|
 | gallery/camera sources reach the picker and the bytes reach `extract` |
 | cancelling the picker sends nothing |
-| the session scanner chooses the API only when signed in |
 | `read()` sends an already-captured photo straight to `extract` with its filename and content type |
-| the session routing applies to `read()` as well as `capture()` |
+| an `image/png` photo keeps its content type |
+| a guest gets the bundled sample without a picker or the API |
+| the session is read per call, so a later sign-in switches paths |
 
 `test/features/scan/presentation/scan_bloc_test.dart` (6 tests) drives the
 camera state machine against a fake `CameraDriver` and a fake repository:
@@ -1669,8 +1672,8 @@ render at 320 px.
 | Contrast | Accent yellow on cream is true to the design but low contrast | Darken the active-tab tint or add a second cue |
 | Theming | Light only | Dark paper theme using the same tokens |
 | Offline sync | Flush happens on the next successful load or a retry tap; a request whose response was lost could be confirmed twice (no idempotency key) | Add a queued `request_id` accepted by the server, and a WorkManager/background flush |
-| SQLite platforms | Real persistence on Android/iOS/macOS; web and Windows/Linux use `MemoryBillStore` for the session | Add `sqflite_common_ffi` for desktop or a web database (drift/IndexedDB) if those become targets |
-| Tests | 91 tests (19 widget + 72 unit, including `ScanBloc` and real SQLite); no golden tests | `bloc_test` for the remaining blocs, golden tests, text-scale coverage |
+| SQLite platforms | Real persistence on Android/iOS/macOS; web and Windows/Linux use `AppDatabase` for the session | Add `sqflite_common_ffi` for desktop or a web database (drift/IndexedDB) if those become targets |
+| Tests | 94 tests (19 widget + 75 unit, including `ScanBloc` and real SQLite); no golden tests | `bloc_test` for the remaining blocs, golden tests, text-scale coverage |
 
 ### The one design trade-off to mention
 
@@ -1700,6 +1703,7 @@ bill" and list content) or use a demo clock.
 | `core/network/api_endpoints.dart` | Every auth and bill path in one list |
 | `core/network/api_exception.dart` | Sealed network failures with user-safe messages |
 | `core/network/api_service.dart` | GET/POST/PUT/DELETE + multipart, JSON, bearer, timeout, errors |
+| `core/database/app_database.dart` | The on-device SQLite service: file, schema, every statement, transactions |
 | `core/di/injector.dart` | `AppDependencies` composition root |
 | `core/navigation/app_routes.dart` | Shared shell route name |
 | `core/navigation/app_shell.dart` | Signed-in shell, tabs, bottom nav |
@@ -1716,19 +1720,19 @@ bill" and list content) or use a demo clock.
 
 | File | Purpose |
 |---|---|
-| `entities/app_user.dart` | id, name, email, isGuest |
+| `entities/user.dart` | id, name, email, isGuest |
 | `entities/auth_provider.dart` | google/apple enum |
 | `failures/auth_failure.dart` | user-safe auth exception |
 | `repositories/auth_repository.dart` | auth contract (includes `restoreSession`, `signOut`) |
-| `usecases/*.dart` | five one-method use cases (`SignOut` included) |
-| `data/datasources/auth_api.dart` | the five auth endpoints and their JSON fields |
+| `usecases/login.dart`, `register.dart` | sign in, create an account |
+| `usecases/sign_in_with_provider.dart`, `continue_as_guest.dart`, `sign_out.dart` | the other three |
+| `data/datasources/auth_remote_datasource.dart` | the five auth endpoints, their JSON fields, HTTP → `AuthFailure` |
 | `data/models/auth_tokens.dart` | access + refresh pair parsed from the API |
-| `data/models/api_user.dart` | `{id, email}` profile from `/auth/me` |
-| `data/session/auth_token_store.dart` | token pair + profile, read synchronously by `ApiService` |
-| `data/session/session_storage.dart` | storage contract + in-memory test implementation |
-| `data/session/shared_preferences_session_storage.dart` | production persistence |
-| `data/repositories/api_auth_repository.dart` | live auth: login/register/me/refresh/logout |
-| `data/repositories/in_memory_auth_repository.dart` | offline fake used by most tests |
+| `data/models/user_model.dart` | `{id, email}` profile from `/auth/me` |
+| `data/session/auth_session_store.dart` | token pair + profile, read synchronously by `ApiService` |
+| `data/session/auth_session_storage.dart` | storage contract + in-memory and SharedPreferences implementations |
+| `data/repositories/auth_repository_impl.dart` | live auth: login/register/me/refresh/logout + session policy |
+| `test/support/fake_auth_repository.dart` | offline fake used by widget tests |
 | `presentation/bloc/auth_{bloc,event,state}.dart` | auth state machine |
 | `presentation/pages/welcome_page.dart` | landing + responsive scroll |
 | `presentation/pages/sign_in_page.dart` | email/password + socials |
@@ -1752,21 +1756,12 @@ bill" and list content) or use a demo clock.
 | `domain/repositories/bill_repository.dart` | fetch/confirm/extract contract |
 | `domain/usecases/fetch_bills.dart` | load bills |
 | `domain/usecases/save_bill.dart` | confirm a reviewed bill |
-| `domain/usecases/extract_bill.dart` | photo → draft + problems |
 | `data/sample_bill.dart` | the design's demo bill |
-| `data/datasources/bill_api.dart` | GET /bills, POST /bills/extract, /bills/confirm |
-| `data/local/bill_queries.dart` | every hand-written SQL statement, nothing else |
-| `data/local/bill_database.dart` | opens `bill_scan.db`, schema version, indexes, migrations |
-| `data/local/bill_row_mapper.dart` | database row ⇄ `Bill` / `BillItem` |
-| `data/local/bill_local_store.dart` | device-storage contract scoped by owner |
-| `data/local/sqlite_bill_store.dart` | sqflite implementation: reads, transactions, promotion |
-| `data/local/memory_bill_store.dart` | in-memory store for tests, web and desktop previews |
+| `data/datasources/bill_remote_datasource.dart` | GET /bills, POST /bills/extract, /bills/confirm, HTTP → `BillFailure` |
 | `data/models/bill_mapper.dart` | API JSON ⇄ domain, money/date/category rules |
-| `data/repositories/api_bill_repository.dart` | live bills + failure translation |
-| `data/repositories/offline_bill_repository.dart` | cache decorator: cache reads, queue writes, flush |
-| `data/repositories/local_bill_repository.dart` | guest device-only bills + one-time demo seed |
-| `data/repositories/session_bill_repository.dart` | offline repo for members, local for guests |
-| `data/repositories/in_memory_bill_repository.dart` | in-memory fake |
+| `data/models/bill_row_mapper.dart` | database row ⇄ `Bill` / `BillItem` |
+| `data/repositories/bill_repository_impl.dart` | API + cache + queue + guest, routed by session |
+| `test/support/fake_bill_repository.dart` | in-memory fake for widget tests |
 | `presentation/bloc/bills_{bloc,event,state}.dart` | list + search + filter + source/pending |
 | `presentation/pages/bills_page.dart` | list screen |
 | `presentation/widgets/bill_tile.dart` | shared bill row (+ pending badge) |
@@ -1787,13 +1782,11 @@ bill" and list content) or use a demo clock.
 | `domain/repositories/scan_repository.dart` | capture / read / sample contract |
 | `domain/usecases/capture_bill.dart` | picker capture use case |
 | `domain/usecases/read_photo.dart` | read an already-captured photo |
-| `data/repositories/api_scan_repository.dart` | image_picker → extraction API |
-| `data/repositories/session_scan_repository.dart` | API scanner for members, simulated for guests |
-| `data/repositories/simulated_scan_repository.dart` | simulated capture for tests |
+| `data/repositories/scan_repository_impl.dart` | image_picker → extraction for members, bundled sample for guests |
 | `presentation/bloc/scan_{bloc,event,state}.dart` | idle/starting/live/blocked/scanning/captured/failure |
 | `presentation/camera/camera_driver.dart` | camera contract + `CameraStatus` |
 | `presentation/camera/plugin_camera_driver.dart` | `camera` plugin: permission, preview, shutter, torch, flip |
-| `presentation/camera/simulated_camera_driver.dart` | fake camera for tests and previews |
+| `test/support/fake_camera_driver.dart` | fake camera for widget tests |
 | `presentation/pages/add_bill_page.dart` | capture entry screen |
 | `presentation/pages/scan_page.dart` | dark camera screen + sheet |
 | `presentation/widgets/capture_frame.dart` | frame painter + status |
@@ -1812,17 +1805,17 @@ bill" and list content) or use a demo clock.
 |---|---|
 | `test/widget_test.dart` | 15 widget tests + helpers, including API sign-in and session restore |
 | `test/offline_flow_test.dart` | 4 widget tests for the offline banner, pending badge and offline save |
-| `test/features/bills/data/bill_database_test.dart` | 9 tests of the real schema/queries on in-memory SQLite |
-| `test/features/bills/data/offline_bill_repository_test.dart` | 6 tests for cache, queue and flush policy |
-| `test/features/bills/data/local_bill_repository_test.dart` | 2 tests for the guest store |
+| `test/core/database/app_database_test.dart` | 9 tests of the real schema/queries on in-memory SQLite |
+| `test/features/bills/data/bill_repository_impl_test.dart` | 6 tests for cache, queue and flush policy |
+| `test/features/bills/data/bill_repository_impl_test.dart` | 2 tests for the guest store |
 | `test/features/scan/presentation/scan_bloc_test.dart` | 6 tests for the camera state machine |
 | `test/core/network/api_endpoints_test.dart` | URL list stays absolute and unique |
 | `test/core/network/api_service_test.dart` | 12 tests for verbs, multipart and errors |
-| `test/features/auth/data/api_auth_repository_test.dart` | 13 tests for auth, tokens, logout and refresh |
-| `test/features/auth/data/auth_token_store_test.dart` | 6 tests for SharedPreferences/in-memory session storage |
-| `test/features/bills/data/bill_api_test.dart` | 6 tests for list/extract/confirm and failures |
-| `test/features/bills/data/session_bill_repository_test.dart` | 3 tests for guest/member routing |
-| `test/features/scan/data/api_scan_repository_test.dart` | 6 tests for the picker/shutter → extract hand-off and session routing |
+| `test/features/auth/data/auth_repository_impl_test.dart` | 13 tests for auth, tokens, logout and refresh |
+| `test/features/auth/data/auth_session_store_test.dart` | 6 tests for SharedPreferences/in-memory session storage |
+| `test/features/bills/data/bill_remote_datasource_test.dart` | 6 tests for list/extract/confirm and failures |
+| `test/features/bills/data/bill_repository_impl_test.dart` | 3 tests for guest/member routing |
+| `test/features/scan/data/scan_repository_impl_test.dart` | 6 tests for the picker/shutter → extract hand-off and session routing |
 | `docs/PROJECT_GUIDE.md` | this document |
 | `docs/SQL_GUIDE.md` | every query explained, plus practice tasks and solutions |
 | `docs/INTERVIEW_NOTES.md` | pitch, Q&A, snippets, debugging stories |
@@ -1835,7 +1828,7 @@ bill" and list content) or use a demo clock.
 - **Use case** — one business operation; the only way a bloc reaches a
   repository (`FetchBills`).
 - **Repository** — a contract for data access (`BillRepository`); its
-  implementation is replaceable (`InMemoryBillRepository`).
+  implementation is replaceable (`FakeBillRepository`).
 - **BLoC** — a state machine that turns events into states.
 - **Sealed class** — a closed type hierarchy; `switch` can be exhaustive.
 - **Event** — an intention from the UI (`ReviewSubmitted`).
@@ -1846,8 +1839,8 @@ bill" and list content) or use a demo clock.
   scroll/state.
 - **Simulated latency** — an artificial delay in in-memory implementations so
   loading states are real and testable.
-- **Offline-first / cache decorator** — the repository reads the server when it
-  can, falls back to the device cache, and queues writes the network refused.
+- **Offline-first repository** — it reads the server when it can, falls back to
+  the device cache, and queues writes the network refused.
 - **Write-behind queue** — a local row that is sent on the next successful sync.
 - **Upsert / `INSERT OR REPLACE`** — insert a row, or replace it when its primary
   key already exists.
@@ -1867,7 +1860,7 @@ bill" and list content) or use a demo clock.
 - Integrated the Flutter data layer with a FastAPI backend through one
   reusable `ApiService` (GET/POST/PUT/DELETE/multipart, JSON, bearer tokens,
   timeouts, typed 400/401/409/413/415/422/429/5xx errors), a central URL list,
-  an `AuthApi`, a `BillApi` and API repositories.
+  an `AuthRemoteDataSource`, a `BillRemoteDataSource` and API repositories.
 - Persisted the JWT pair and profile in SharedPreferences, restored the session
   before the first frame, and kept storage behind an interface so a secure vault
   can replace it.
@@ -1876,11 +1869,11 @@ bill" and list content) or use a demo clock.
   after review, with 422 `problems` shown on the exact fields.
 - Built an offline-first bill layer: a sqflite cache with a two-table schema,
   indexes, foreign-key cascade and migrations, a write-behind upload queue that
-  survives restart, and a repository decorator that falls back to the cache on
+  survives restart, and one repository that falls back to the cache on
   connection failure; documented every query in a teaching guide
   (`docs/SQL_GUIDE.md`).
-- Wrote 91 tests: 19 widget paths (including API sign-in, session restore, the
+- Wrote 94 tests: 19 widget paths (including API sign-in, session restore, the
   refused-camera path, the offline banner and an offline save at 320/390/800 px)
-  and 72 unit tests for URLs, HTTP, mapping, storage, the SQLite schema and
+  and 75 unit tests for URLs, HTTP, mapping, storage, the SQLite schema and
   queries, repositories, the offline queue and the scan bloc; kept
   `flutter analyze` clean.

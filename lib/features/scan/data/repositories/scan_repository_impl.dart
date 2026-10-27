@@ -8,32 +8,52 @@ import '../../domain/entities/captured_photo.dart';
 import '../../domain/entities/scan_source.dart';
 import '../../domain/repositories/scan_repository.dart';
 
-/// The real capture path: a photo from the camera or library, then the bill
-/// scanner through [BillRepository.extract].
+/// The capture path: a photo from the camera or the library, read by the bill
+/// scanner.
 ///
-/// No image bytes are kept after the request; the scanner stores nothing until
-/// the person confirms the reviewed draft.
-class ApiScanRepository implements ScanRepository {
-  ApiScanRepository({
-    required BillRepository billRepository,
+/// A signed-in account uploads through [BillRepository.extract], which is where
+/// the token, the failure messages and the API live. A guest has no token, so
+/// the bundled demo bill is returned after a short delay and the whole flow
+/// stays usable — that is also what makes the flow testable without a device
+/// camera.
+///
+/// Nothing is stored here: the scan screen holds the draft until the person
+/// confirms it on the review screen.
+final class ScanRepositoryImpl implements ScanRepository {
+  ScanRepositoryImpl({
+    required BillRepository bills,
+    required bool Function() hasSession,
     ImagePicker? picker,
     Future<XFile?> Function(ImageSource source)? pickImage,
     DateTime Function()? now,
-  }) : _billRepository = billRepository,
+    this.guestLatency = const Duration(milliseconds: 1200),
+  }) : _bills = bills,
+       _hasSession = hasSession,
        _picker = picker ?? ImagePicker(),
        _pickImage = pickImage,
        _now = now ?? DateTime.now;
 
-  final BillRepository _billRepository;
+  final BillRepository _bills;
+
+  /// Read per call, so signing in changes the scanner without a rebuild.
+  final bool Function() _hasSession;
+
+  /// The plugin, or the injected replacement used by tests.
   final ImagePicker _picker;
   final Future<XFile?> Function(ImageSource source)? _pickImage;
   final DateTime Function() _now;
+
+  /// How long the simulated guest reading takes; long enough for the scanning
+  /// state to be visible.
+  final Duration guestLatency;
 
   @override
   Bill get sampleBill => buildSampleBill(_now());
 
   @override
   Future<BillExtraction?> capture(ScanSource source) async {
+    if (!_hasSession()) return _guestReport();
+
     final ImageSource imageSource = source == ScanSource.camera
         ? ImageSource.camera
         : ImageSource.gallery;
@@ -56,12 +76,23 @@ class ApiScanRepository implements ScanRepository {
   }
 
   @override
-  Future<BillExtraction> read(CapturedPhoto photo) {
-    return _billRepository.extract(
+  Future<BillExtraction> read(CapturedPhoto photo) async {
+    if (!_hasSession()) return _guestReport();
+
+    return _bills.extract(
       bytes: photo.bytes,
       filename: photo.filename,
       contentType: photo.contentType,
     );
+  }
+
+  /// The draft a guest gets: the demo bill, after a delay long enough for the
+  /// scanning state to be seen.
+  Future<BillExtraction> _guestReport() async {
+    if (guestLatency > Duration.zero) {
+      await Future<void>.delayed(guestLatency);
+    }
+    return BillExtraction(bill: buildSampleBill(_now()));
   }
 
   static String _contentType(XFile photo) {

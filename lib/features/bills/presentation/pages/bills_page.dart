@@ -19,6 +19,7 @@ import '../bloc/bills_bloc.dart';
 import '../bloc/bills_event.dart';
 import '../bloc/bills_state.dart';
 import '../widgets/bill_tile.dart';
+import '../widgets/sync_status_banner.dart';
 
 /// Every saved bill, with a search field and category filters.
 class BillsPage extends StatelessWidget {
@@ -38,6 +39,15 @@ class BillsPage extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.lg),
             if (state is BillsLoaded) ...<Widget>[
+              if (state.needsSyncNotice) ...<Widget>[
+                SyncStatusBanner(
+                  isOffline: state.isOffline,
+                  pendingCount: state.pendingCount,
+                  onRetry: () =>
+                      context.read<BillsBloc>().add(const BillsReloaded()),
+                ),
+                const SizedBox(height: AppSpacing.md),
+              ],
               _MonthCard(
                 summary: BillSummary.fromBills(state.bills, now),
                 now: now,

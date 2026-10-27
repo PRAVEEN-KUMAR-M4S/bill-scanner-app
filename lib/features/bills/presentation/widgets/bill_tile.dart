@@ -66,6 +66,33 @@ class BillTile extends StatelessWidget {
                     height: 1.2,
                   ),
                 ),
+                if (bill.isPendingSync) ...<Widget>[
+                  const SizedBox(height: 3),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      const Icon(
+                        Icons.cloud_upload_outlined,
+                        size: 11,
+                        color: AppColors.inkMuted,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Flexible(
+                        child: Text(
+                          'Pending sync',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppFonts.display(
+                            size: 10,
+                            weight: FontWeight.w600,
+                            color: AppColors.inkMuted,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

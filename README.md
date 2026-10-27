@@ -16,7 +16,7 @@ so the dashboard opens offline and saves wait in an upload queue.
 | **Design system** | Token-driven colours, spacing, radii, shadows and typography; 13 shared widgets |
 | **Responsive** | Verified at 320×568, 390×844 and 800×1000 |
 | **Camera** | In-app preview: permission → preview → shutter → API, with a loader; a simulated driver keeps tests off the plugin |
-| **Quality** | `flutter analyze` clean, 91 tests passing |
+| **Quality** | `flutter analyze` clean, 94 tests passing |
 
 ## Screens
 
@@ -61,7 +61,7 @@ See **[Running on a real Android phone](docs/ANDROID_DEVICE.md)** for the full
 checklist, first-run tests and troubleshooting.
 
 ```bash
-flutter test      # 91 tests, including real in-memory SQLite
+flutter test      # 94 tests, including real in-memory SQLite
 flutter analyze
 ```
 
@@ -86,12 +86,14 @@ flutter analyze
 lib/
 ├── main.dart / app.dart        # restores dependencies, app-level blocs, routes
 ├── core/
+│   ├── database/              # AppDatabase: the SQLite service (schema + statements)
 │   ├── network/               # ApiConfig, ApiEndpoints, ApiService, exceptions
 │   ├── di/ theme/ navigation/ utils/ widgets/
-└── features/
+└── features/<feature>/         # data/ datasources+models+repositories,
+    │                          # domain/ entities+repositories+usecases,
+    │                          # presentation/ bloc+pages+widgets
     ├── auth/                  # welcome, sign in, register, persisted API session
-    ├── bills/                 # entities, BillApi, SQLite cache, offline/queued
-    │                          # repositories, list + sync banner
+    ├── bills/                 # bills: API data source, cache, queue, list + banner
     ├── home/                  # spending dashboard
     ├── scan/                  # camera preview + shutter, extraction, add bill
     └── review/                # editable review form + confirm
@@ -112,7 +114,9 @@ lib/
   `POST /bills/extract` behind a loader. A `CameraDriver` abstraction keeps the
   plugin out of the bloc and lets tests inject a simulated camera.
 - **Offline is real.** `GET /bills` is cached in SQLite on Android, iOS and
-  macOS (web and desktop previews fall back to an in-memory store); if the
+  macOS through one database service (`lib/core/database/app_database.dart`); on
+  web and Windows/Linux there is no sqflite plugin, so those builds run without
+  the cache. If the
   server is unreachable the dashboard shows the cache with an offline banner. A
   bill confirmed while offline is stored with a `local-…` id and a `Pending
   sync` badge, then pushed to `/bills/confirm` on the next successful load. Only

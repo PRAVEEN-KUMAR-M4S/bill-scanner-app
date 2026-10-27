@@ -1,8 +1,8 @@
 import 'package:equatable/equatable.dart';
 
 /// The signed-in identity. Guests have an empty [email].
-class AppUser extends Equatable {
-  const AppUser({
+class User extends Equatable {
+  const User({
     required this.id,
     required this.name,
     required this.email,

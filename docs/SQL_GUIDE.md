@@ -3,7 +3,7 @@
 This is the learning companion to the offline cache. It explains every SQL
 statement the app runs, one at a time, starting from what a table is. The
 queries themselves live in
-[`lib/features/bills/data/local/bill_queries.dart`](../lib/features/bills/data/local/bill_queries.dart);
+[`lib/core/database/app_database.dart`](../lib/core/database/app_database.dart);
 this document repeats them with the explanation, the Dart call site and
 practice tasks, so you can type them yourself against a real database.
 
@@ -16,11 +16,10 @@ are at the end so you can check yourself.
 
 | Layer | File | What it knows |
 |---|---|---|
-| SQL text | `lib/features/bills/data/local/bill_queries.dart` | every hand-written statement, nothing else |
-| Execution | `lib/features/bills/data/local/sqlite_bill_store.dart` | binds `?` values, groups rows, runs transactions |
-| Schema | `lib/features/bills/data/local/bill_database.dart` | file name, version, `onCreate` / `onUpgrade`, pragma |
-| Mapping | `lib/features/bills/data/local/bill_row_mapper.dart` | row ⇄ `Bill`, column names |
-| Policy | `lib/features/bills/data/repositories/offline_bill_repository.dart` | when to read the cache, when to queue |
+| SQL text | `lib/core/database/app_database.dart` | the database service: every hand-written statement, the schema, the file name and version |
+| Execution | `lib/core/database/app_database.dart` | binds `?` values, groups rows, runs the transactions |
+| Mapping | `lib/features/bills/data/models/bill_row_mapper.dart` | row ⇄ `Bill`, column names |
+| Policy | `lib/features/bills/data/repositories/bill_repository_impl.dart` | when to read the cache, when to queue |
 
 The SQL is kept out of the repository and out of the widgets on purpose:
 
@@ -29,10 +28,14 @@ The SQL is kept out of the repository and out of the widgets on purpose:
 - no page, bloc or repository has a `SELECT` hidden inside it.
 
 > **Why not literally only in the doc?** The app has to execute the SQL to be
-> offline. The compromise is that no statement is scattered through logic:
-> `bill_queries.dart` is a flat catalogue, and this guide mirrors it
-> query-for-query. Type a query here first, get it right in a scratch database,
-> then copy it into the catalogue.
+> offline. The compromise is that no statement is scattered through logic: the
+> statements sit together at the bottom of the database service, and this guide
+> mirrors them query-for-query. Type a query here first, get it right in a
+> scratch database (§10.1), then copy it into `AppDatabase`.
+>
+> The statements are private constants at the bottom of `app_database.dart`;
+> this guide names them without their leading underscore, so `selectBillsForOwner`
+> here is `_selectBillsForOwner` in the code.
 
 ---
 
@@ -47,8 +50,9 @@ two problems:
 
 SQLite gives both with one file, no server, ACID transactions and indexed
 queries. `sqflite` is the Flutter plugin that exposes it on Android, iOS and
-macOS. (Web and Windows/Linux desktop have no sqflite implementation; in those
-builds the app falls back to `MemoryBillStore`, so previews still work but do
+macOS. (Web and Windows/Linux desktop have no sqflite implementation; there
+`AppDatabase.open()` returns `null`, the repository skips the cache, and a
+guest's bills live in memory for the run — previews still work, they just do
 not survive a restart.)
 
 What it is **not** for: the access token (that is SharedPreferences today,
@@ -106,7 +110,7 @@ next successful read, then replaced by the server's row.
 
 ---
 
-## 4. Schema — `BillQueries.createBillsTable` etc.
+## 4. Schema — `createBillsTable` etc.
 
 ### 4.1 The `bills` table
 
@@ -175,7 +179,7 @@ PRAGMA foreign_keys = ON
 ```
 
 SQLite disables foreign keys by default (a 2000s compatibility decision).
-`BillDatabase._configure` runs this on every connection; without it,
+`_configure` runs this on every connection; without it,
 `ON DELETE CASCADE` silently does nothing and orphan items pile up.
 
 ### 4.4 Indexes
@@ -197,7 +201,7 @@ join and its `ORDER BY` cheap.
 
 ### 5.1 The list for one owner
 
-`BillQueries.selectBillsForOwner`
+`selectBillsForOwner`
 
 ```sql
 SELECT id, owner_id, merchant, bill_date, total, currency, category,
@@ -218,8 +222,9 @@ How to read it:
 4. The column list is explicit instead of `SELECT *` so adding a column later
    cannot silently change a Dart map.
 
-Dart side (`SqliteBillStore._read`) passes `[ownerId]` and maps each row with
-`BillRowMapper.fromRow`.
+Dart side: `AppDatabase.readBills` passes `[ownerId]`, and
+`BillRepositoryImpl` groups the rows by `bill_id` and maps each one with
+`BillRowMapper.fromRows`.
 
 **Try it**
 
@@ -229,7 +234,7 @@ SELECT merchant, total FROM bills WHERE owner_id = '7' ORDER BY bill_date DESC;
 
 ### 5.2 The items, in one query
 
-`BillQueries.selectItemsForOwner`
+`selectItemsForOwner`
 
 ```sql
 SELECT i.bill_id, i.name, i.amount, i.quantity, i.position
@@ -269,7 +274,7 @@ ORDER BY b.bill_date DESC, i.position;
 
 ### 5.3 The upload queue
 
-`BillQueries.selectPendingBillsForOwner`
+`selectPendingBillsForOwner`
 
 ```sql
 SELECT id, owner_id, merchant, bill_date, total, currency, category,
@@ -287,7 +292,7 @@ ORDER BY created_at ASC
 
 ### 5.4 Items for the queue
 
-`BillQueries.selectPendingItemsForOwner`
+`selectPendingItemsForOwner`
 
 ```sql
 SELECT i.bill_id, i.name, i.amount, i.quantity, i.position
@@ -297,13 +302,13 @@ WHERE b.owner_id = ? AND b.sync_status = ?
 ORDER BY i.bill_id, i.position
 ```
 
-Same join as §5.2 with the queue filter. The store passes
+Same join as §5.2 with the queue filter. The repository passes
 `[ownerId, 'pending']` for both statements, so the bills and their items always
 describe the same set.
 
 ### 5.5 Does this owner have any bills?
 
-`BillQueries.countBillsForOwner`
+`countBillsForOwner`
 
 ```sql
 SELECT COUNT(*) AS bill_count
@@ -312,7 +317,7 @@ WHERE owner_id = ?
 ```
 
 `COUNT(*)` counts rows; `AS bill_count` names the result column so Dart can read
-`row['bill_count']` instead of a positional index. `LocalBillRepository` uses it
+`row['bill_count']` instead of a positional index. `BillRepositoryImpl` uses it
 to seed the demo bill exactly once for a guest.
 
 ---
@@ -338,7 +343,7 @@ bill updates the cache.
 Two cautions that come with it:
 
 1. `REPLACE` deletes the old row, and with foreign keys on that **cascades to
-   `bill_items`**. The store deletes and re-inserts the items in the same
+   `bill_items`**. `AppDatabase` deletes and re-inserts the items in the same
    transaction, so they are not lost.
 2. `ON CONFLICT (id) DO UPDATE` (a true upsert) is the modern alternative, but
    it needs SQLite 3.24+. Older Android releases ship an older SQLite, so
@@ -346,13 +351,13 @@ Two cautions that come with it:
 
 ### 6.2 Delete the old items first
 
-`BillQueries.deleteItemsForBill`
+`deleteItemsForBill`
 
 ```sql
 DELETE FROM bill_items WHERE bill_id = ?
 ```
 
-Before writing a bill's items, the store removes the previous ones. Without
+Before writing a bill's items, the service removes the previous ones. Without
 this, re-saving a bill with two lines instead of three would leave the third
 line behind.
 
@@ -362,7 +367,7 @@ too.
 
 ### 6.3 Delete one bill
 
-`BillQueries.deleteBillById`
+`deleteBillById`
 
 ```sql
 DELETE FROM bills WHERE id = ? AND owner_id = ?
@@ -375,7 +380,7 @@ With foreign keys on, the matching `bill_items` rows go automatically.
 
 ### 6.4 Delete only the server-owned rows
 
-`BillQueries.deleteSyncedBillsForOwner`
+`deleteSyncedBillsForOwner`
 
 ```sql
 DELETE FROM bills
@@ -389,7 +394,7 @@ refresh.
 
 ### 6.5 Promote a queued bill
 
-Two statements in one transaction (`SqliteBillStore.promotePending`):
+Two statements in one transaction (`AppDatabase.promotePending`):
 
 ```sql
 -- 1. remove the temporary local row (its items cascade)
@@ -407,7 +412,7 @@ replaces it; showing both would double-count the spend on the dashboard.
 
 ## 7. Transactions
 
-The store wraps multi-row writes in `database.transaction((txn) async { … })`.
+`AppDatabase` wraps multi-row writes in `database.transaction((txn) async { … })`.
 Examples: saving a bill plus its items, replacing the cache, promoting a queued
 bill.
 
@@ -445,7 +450,7 @@ that actually uses it.
 
 ## 9. Migrations
 
-`BillDatabase.schemaVersion` is `1`. On first install, `onCreate` runs; on later
+`AppDatabase.schemaVersion` is `1`. On first install, `onCreate` runs; on later
 installs, `onUpgrade` runs only when the stored version is lower than the code's
 version.
 
@@ -489,25 +494,25 @@ Rules:
 file like this under `test/` and replace the query:
 
 ```dart
+import 'package:bill_scanner/core/database/app_database.dart';
+import 'package:bill_scanner/features/bills/data/models/bill_row_mapper.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:bill_scanner/features/bills/data/local/bill_database.dart';
-import 'package:bill_scanner/features/bills/data/local/sqlite_bill_store.dart';
 
 void main() {
   sqfliteFfiInit();
 
   test('scratch', () async {
-    final db = await BillDatabase.open(
+    final AppDatabase db = (await AppDatabase.open(
       factory: databaseFactoryFfi,
       filePath: inMemoryDatabasePath,
-    );
+    ))!;
 
-    // Seed with the real store so the schema and mapper are exercised.
-    final store = SqliteBillStore(db.database);
-    // await store.saveBill('7', bill); // build a Bill in the test
+    // Seed one row through the real mapper, so the schema and the columns are
+    // exercised exactly as the app writes them.
+    // await db.saveBill('7', BillRowMapper.toRows(bill));
 
-    final rows = await db.database.rawQuery('''
+    final rows = await db.raw.rawQuery('''
       SELECT … -- your query here
     ''', <Object?>['7']);
 
@@ -555,7 +560,7 @@ PRAGMA table_info(bills);
 
 | Symptom | Likely cause | Check |
 |---|---|---|
-| Items disappear when a bill is deleted | foreign keys off | `PRAGMA foreign_keys;` must be `1`; it is set in `BillDatabase._configure` |
+| Items disappear when a bill is deleted | foreign keys off | `PRAGMA foreign_keys;` must be `1`; it is set in `_configure` |
 | Cache refresh wiped an unsynced bill | refresh deleted all rows | `deleteSyncedBillsForOwner` must filter `sync_status` (see §6.4) |
 | A bill appears twice | queue promoted without deleting the local row | `promotePending` is one transaction: delete local, insert server (§6.5) |
 | Duplicate items after an edit | items not cleared first | `deleteItemsForBill` before the inserts (§6.2) |
@@ -739,7 +744,7 @@ Money to integer paise, and a `server_updated_at` column plus a last-write-wins
 rule (or a proper conflict UI) for edits made on two devices.
 
 **How is the cache tested?**
-Two levels: the repository against an in-memory `BillLocalStore` (queue, cache
+Two levels: the repository against an in-memory `AppDatabase` (queue, cache
 fallback, failure policy), and the SQL against real SQLite through
 `sqflite_common_ffi` — schema, ordering, owner partitioning, cascade, promotion.
 The widget tests then check the banner, the pending badge and an offline save at

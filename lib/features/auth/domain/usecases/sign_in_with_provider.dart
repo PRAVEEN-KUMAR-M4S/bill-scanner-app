@@ -1,4 +1,4 @@
-import '../entities/app_user.dart';
+import '../entities/user.dart';
 import '../entities/auth_provider.dart';
 import '../repositories/auth_repository.dart';
 
@@ -7,7 +7,7 @@ class SignInWithProvider {
 
   final AuthRepository _repository;
 
-  Future<AppUser> call(AuthProvider provider) {
+  Future<User> call(AuthProvider provider) {
     return _repository.signInWithProvider(provider);
   }
 }

@@ -43,9 +43,15 @@ class ReviewPage extends StatelessWidget {
       listener: (BuildContext context, ReviewState state) {
         if (state is ReviewSaved) {
           context.read<BillsBloc>().add(const BillsReloaded());
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Bill saved')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                state.bill.isPendingSync
+                    ? 'Saved on this phone. It will sync when you are back online.'
+                    : 'Bill saved',
+              ),
+            ),
+          );
           Navigator.of(context).popUntil(ModalRoute.withName(AppRoutes.shell));
         } else if (state is ReviewEditing && state.failureMessage != null) {
           ScaffoldMessenger.of(

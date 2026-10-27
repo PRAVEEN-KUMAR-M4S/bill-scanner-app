@@ -1,11 +1,11 @@
-import '../entities/bill.dart';
+import '../entities/bills_snapshot.dart';
 import '../repositories/bill_repository.dart';
 
-/// Loads every saved bill, newest first.
+/// Loads the current bill list, syncing and caching when the store supports it.
 class FetchBills {
   const FetchBills(this._repository);
 
   final BillRepository _repository;
 
-  Future<List<Bill>> call() => _repository.fetchBills();
+  Future<BillsSnapshot> call() => _repository.fetchBills();
 }

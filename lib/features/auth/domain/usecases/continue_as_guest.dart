@@ -1,4 +1,4 @@
-import '../entities/app_user.dart';
+import '../entities/user.dart';
 import '../repositories/auth_repository.dart';
 
 class ContinueAsGuest {
@@ -6,5 +6,5 @@ class ContinueAsGuest {
 
   final AuthRepository _repository;
 
-  Future<AppUser> call() => _repository.continueAsGuest();
+  Future<User> call() => _repository.continueAsGuest();
 }

@@ -1,10 +1,10 @@
 import 'dart:convert';
 
 import 'package:bill_scanner/core/network/api_service.dart';
-import 'package:bill_scanner/features/bills/data/datasources/bill_api.dart';
-import 'package:bill_scanner/features/bills/data/repositories/api_bill_repository.dart';
+import 'package:bill_scanner/features/bills/data/datasources/bill_remote_datasource.dart';
 import 'package:bill_scanner/features/bills/domain/entities/bill.dart';
 import 'package:bill_scanner/features/bills/domain/entities/bill_category.dart';
+import 'package:bill_scanner/features/bills/domain/entities/bill_extraction.dart';
 import 'package:bill_scanner/features/bills/domain/entities/bill_item.dart';
 import 'package:bill_scanner/features/bills/domain/failures/bill_failure.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -37,10 +37,10 @@ Map<String, dynamic> expenseJson() {
 }
 
 void main() {
-  group('BillApi', () {
+  group('endpoints', () {
     test('GET /bills maps rows, line amounts and the null quantity', () async {
       late http.Request seen;
-      final BillApi api = BillApi(
+      final BillRemoteDataSource remote = BillRemoteDataSource(
         serviceWith(
           MockClient((http.Request request) async {
             seen = request;
@@ -52,7 +52,7 @@ void main() {
         ),
       );
 
-      final List<Bill> bills = await api.fetchAll();
+      final List<Bill> bills = await remote.fetchAll();
 
       expect(seen.method, 'GET');
       expect(seen.url.path, '/bills');
@@ -77,7 +77,7 @@ void main() {
       'POST /bills/extract sends a JPG/PNG part and reads problems',
       () async {
         late http.Request seen;
-        final BillApi api = BillApi(
+        final BillRemoteDataSource remote = BillRemoteDataSource(
           serviceWith(
             MockClient((http.Request request) async {
               seen = request;
@@ -114,7 +114,7 @@ void main() {
           ),
         );
 
-        final report = await api.extract(
+        final BillExtraction report = await remote.extract(
           bytes: <int>[1, 2, 3, 4],
           filename: 'bill.png',
           contentType: 'image/png',
@@ -143,7 +143,7 @@ void main() {
       'POST /bills/confirm sends the edited draft and returns the row',
       () async {
         late http.Request seen;
-        final BillApi api = BillApi(
+        final BillRemoteDataSource remote = BillRemoteDataSource(
           serviceWith(
             MockClient((http.Request request) async {
               seen = request;
@@ -164,7 +164,7 @@ void main() {
           ],
         );
 
-        final Bill saved = await api.confirm(bill);
+        final Bill saved = await remote.confirm(bill);
 
         final Map<String, dynamic> body =
             jsonDecode(seen.body) as Map<String, dynamic>;
@@ -192,38 +192,36 @@ void main() {
     );
   });
 
-  group('ApiBillRepository', () {
+  group('failures', () {
     test('a refused confirm keeps the server problems', () async {
-      final ApiBillRepository repository = ApiBillRepository(
-        billApi: BillApi(
-          serviceWith(
-            MockClient((http.Request request) async {
-              return http.Response(
-                jsonEncode(<String, dynamic>{
-                  'detail': <String, dynamic>{
-                    'message': 'Fix the highlighted fields before saving.',
-                    'problems': <Map<String, dynamic>>[
-                      <String, dynamic>{
-                        'field': 'total',
-                        'message':
-                            'Items add up to 125.00 but the total says 99.99.',
-                      },
-                      <String, dynamic>{
-                        'field': 'items[0].amount',
-                        'message': 'Line amount is unreadable.',
-                      },
-                    ],
-                  },
-                }),
-                422,
-              );
-            }),
-          ),
+      final BillRemoteDataSource remote = BillRemoteDataSource(
+        serviceWith(
+          MockClient((http.Request request) async {
+            return http.Response(
+              jsonEncode(<String, dynamic>{
+                'detail': <String, dynamic>{
+                  'message': 'Fix the highlighted fields before saving.',
+                  'problems': <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'field': 'total',
+                      'message':
+                          'Items add up to 125.00 but the total says 99.99.',
+                    },
+                    <String, dynamic>{
+                      'field': 'items[0].amount',
+                      'message': 'Line amount is unreadable.',
+                    },
+                  ],
+                },
+              }),
+              422,
+            );
+          }),
         ),
       );
 
       await expectLater(
-        repository.save(
+        remote.confirm(
           Bill(
             id: '',
             merchant: 'Lulu',
@@ -244,29 +242,32 @@ void main() {
                 (BillFailure failure) => failure.problems,
                 'problems',
                 hasLength(2),
+              )
+              .having(
+                (BillFailure failure) => failure.isOffline,
+                'isOffline',
+                isFalse,
               ),
         ),
       );
     });
 
     test('a photo over the limit becomes a readable failure', () async {
-      final ApiBillRepository repository = ApiBillRepository(
-        billApi: BillApi(
-          serviceWith(
-            MockClient((http.Request request) async {
-              return http.Response(
-                jsonEncode(<String, dynamic>{
-                  'detail': 'Photo is too large (max 5 MB).',
-                }),
-                413,
-              );
-            }),
-          ),
+      final BillRemoteDataSource remote = BillRemoteDataSource(
+        serviceWith(
+          MockClient((http.Request request) async {
+            return http.Response(
+              jsonEncode(<String, dynamic>{
+                'detail': 'Photo is too large (max 5 MB).',
+              }),
+              413,
+            );
+          }),
         ),
       );
 
       await expectLater(
-        repository.extract(
+        remote.extract(
           bytes: <int>[0],
           filename: 'bill.jpg',
           contentType: 'image/jpeg',
@@ -281,24 +282,49 @@ void main() {
       );
     });
 
-    test('loading bills explains an unreachable server', () async {
-      final ApiBillRepository repository = ApiBillRepository(
-        billApi: BillApi(
-          serviceWith(
-            MockClient((http.Request request) async {
-              throw http.ClientException('offline');
-            }),
-          ),
+    test('an unreachable server is flagged as offline', () async {
+      final BillRemoteDataSource remote = BillRemoteDataSource(
+        serviceWith(
+          MockClient((http.Request request) async {
+            throw http.ClientException('offline');
+          }),
         ),
       );
 
       await expectLater(
-        repository.fetchBills(),
+        remote.fetchAll(),
+        throwsA(
+          isA<BillFailure>()
+              .having(
+                (BillFailure failure) => failure.message,
+                'message',
+                contains('Could not reach the server'),
+              )
+              .having(
+                (BillFailure failure) => failure.isOffline,
+                'isOffline',
+                isTrue,
+              ),
+        ),
+      );
+    });
+
+    test('an expired session stops the read', () async {
+      final BillRemoteDataSource remote = BillRemoteDataSource(
+        serviceWith(
+          MockClient((http.Request request) async {
+            return http.Response('{"detail":"expired"}', 401);
+          }),
+        ),
+      );
+
+      await expectLater(
+        remote.fetchAll(),
         throwsA(
           isA<BillFailure>().having(
             (BillFailure failure) => failure.message,
             'message',
-            contains('Could not reach the server'),
+            contains('session expired'),
           ),
         ),
       );

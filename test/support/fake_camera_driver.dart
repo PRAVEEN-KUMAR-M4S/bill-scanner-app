@@ -1,16 +1,15 @@
+import 'package:bill_scanner/core/theme/app_colors.dart';
+import 'package:bill_scanner/features/scan/domain/entities/captured_photo.dart';
+import 'package:bill_scanner/features/scan/presentation/camera/camera_driver.dart';
 import 'package:flutter/material.dart';
 
-import '../../../../core/theme/app_colors.dart';
-import '../../domain/entities/captured_photo.dart';
-import 'camera_driver.dart';
-
-/// A camera that behaves like a real one without a device.
+/// A camera that behaves like a real one without a device, used by widget
+/// tests.
 ///
-/// Used by widget tests and previews: [open] can be told to report a denial so
-/// the blocked state is reachable, and [buildPreview] draws a stand-in frame
-/// instead of a live texture.
-class SimulatedCameraDriver implements CameraDriver {
-  SimulatedCameraDriver({
+/// [open] can be told to report a denial so the blocked state is reachable, and
+/// [buildPreview] draws a stand-in frame instead of a live texture.
+class FakeCameraDriver implements CameraDriver {
+  FakeCameraDriver({
     this.statusOnOpen = CameraStatus.live,
     this.latency = Duration.zero,
     this.lensCount = 2,

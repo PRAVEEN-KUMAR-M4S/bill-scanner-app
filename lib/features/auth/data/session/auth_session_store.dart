@@ -1,16 +1,20 @@
-import '../../domain/entities/app_user.dart';
+import '../../domain/entities/user.dart';
 import '../models/auth_tokens.dart';
-import 'session_storage.dart';
+import 'auth_session_storage.dart';
 
-/// Holds the current session and writes it through [SessionStorage].
+/// Holds the current session and writes it through [AuthSessionStorage].
 ///
-/// The access token is read synchronously by [ApiService] before an
+/// The access token is read synchronously by `ApiService` before an
 /// authenticated request, so reads stay in memory; writes go to storage (in
-/// production, SharedPreferences) so the next launch can restore the session
+/// production SharedPreferences) so the next launch can restore the session
 /// without a round trip.
-class AuthTokenStore {
-  AuthTokenStore({SessionStorage? storage})
-    : _storage = storage ?? InMemorySessionStorage();
+///
+/// This is also what the repository layer asks to know whether a request should
+/// go to the API or stay local: `hasSession` means "there is an access token",
+/// while `isSignedIn` also covers a guest, who has a profile but no tokens.
+class AuthSessionStore {
+  AuthSessionStore({AuthSessionStorage? storage})
+    : _storage = storage ?? InMemoryAuthSessionStorage();
 
   static const String accessTokenKey = 'session.access_token';
   static const String refreshTokenKey = 'session.refresh_token';
@@ -19,15 +23,15 @@ class AuthTokenStore {
   static const String userEmailKey = 'session.user_email';
   static const String userIsGuestKey = 'session.user_is_guest';
 
-  final SessionStorage _storage;
+  final AuthSessionStorage _storage;
 
   String? _accessToken;
   String? _refreshToken;
-  AppUser? _user;
+  User? _user;
 
   String? get accessToken => _accessToken;
   String? get refreshToken => _refreshToken;
-  AppUser? get user => _user;
+  User? get user => _user;
 
   bool get hasSession => _accessToken != null && _accessToken!.isNotEmpty;
 
@@ -46,7 +50,7 @@ class AuthTokenStore {
       return;
     }
 
-    _user = AppUser(
+    _user = User(
       id: id,
       name: name,
       email: _storage.read(userEmailKey) ?? '',
@@ -55,7 +59,7 @@ class AuthTokenStore {
   }
 
   /// Stores a token pair and, when supplied, the account it belongs to.
-  Future<void> save(AuthTokens tokens, {AppUser? user}) async {
+  Future<void> save(AuthTokens tokens, {User? user}) async {
     _accessToken = tokens.accessToken;
     _refreshToken = tokens.refreshToken;
     if (user != null) _user = user;
@@ -68,7 +72,7 @@ class AuthTokenStore {
   }
 
   /// Remembers the profile separately from the tokens (guest mode has none).
-  Future<void> saveUser(AppUser user) async {
+  Future<void> saveUser(User user) async {
     _user = user;
     await Future.wait(_userWrites(user));
   }
@@ -88,7 +92,7 @@ class AuthTokenStore {
     ]);
   }
 
-  List<Future<void>> _userWrites(AppUser user) {
+  List<Future<void>> _userWrites(User user) {
     return <Future<void>>[
       _storage.write(userIdKey, user.id),
       _storage.write(userNameKey, user.name),

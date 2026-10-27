@@ -1,22 +1,22 @@
-import '../entities/app_user.dart';
+import '../entities/user.dart';
 import '../entities/auth_provider.dart';
 
 /// Contract for authentication, fulfilled by the data layer.
 abstract interface class AuthRepository {
-  Future<AppUser> signIn({required String email, required String password});
+  Future<User> signIn({required String email, required String password});
 
-  Future<AppUser> register({
+  Future<User> register({
     required String name,
     required String email,
     required String password,
   });
 
-  Future<AppUser> signInWithProvider(AuthProvider provider);
+  Future<User> signInWithProvider(AuthProvider provider);
 
-  Future<AppUser> continueAsGuest();
+  Future<User> continueAsGuest();
 
   /// The account saved on this device, or `null` when nobody is signed in.
-  Future<AppUser?> restoreSession();
+  Future<User?> restoreSession();
 
   /// Ends the session locally and, when the backend is involved, revokes it.
   Future<void> signOut();

@@ -19,7 +19,7 @@ debugging stories that make the project sound like work rather than a tutorial.
 > paper components, and layouts verified from 320-pixel phones up to tablets.
 > Bills are offline-first: SQLite caches the last list, and a save made without
 > a connection waits in an upload queue and syncs on the next successful load.
-> It has 91 tests — 19 widget paths and 72 unit tests (network, data, SQLite
+> It has 94 tests — 19 widget paths and 75 unit tests (network, data, SQLite
 > schema/queries, the offline queue and the scan bloc) — and the analyzer is
 > clean."
 
@@ -29,7 +29,7 @@ debugging stories that make the project sound like work rather than a tutorial.
 
 1. **Auth** — `WelcomePage` offers guest, sign-in and registration. Forms use
    `Form` + validators; `AuthBloc` emits loading/authenticated/error. Email auth
-   goes `AuthBloc → ApiAuthRepository → AuthApi → ApiService`, stores the token
+   goes `AuthBloc → AuthRepositoryImpl → AuthRemoteDataSource → ApiService`, stores the token
    pair and loads `/auth/me`; one listener in `app.dart` moves the stack to the
    shell or shows a snack bar.
 2. **Shell** — Home and Bills live in an `IndexedStack` behind a custom bottom
@@ -48,7 +48,7 @@ debugging stories that make the project sound like work rather than a tutorial.
    totals, and save. On success `ReviewSaved` triggers a bills reload, a snack
    bar and a pop to the shell.
 7. **Quality** — 13 shared design-system widgets, design tokens instead of
-   hardcoded values, responsive patterns, 91 tests (19 widget + 72 unit,
+   hardcoded values, responsive patterns, 94 tests (19 widget + 75 unit,
    including real SQLite) and zero analyzer issues.
 
 ---
@@ -119,7 +119,7 @@ tap → event → bloc → use case → repository (interface)
 **Q: Where does this project apply it?**
 > Every feature is split into `domain`, `data` and `presentation`. For example
 > bills: `Bill`/`BillItem`/`BillRepository`/`FetchBills` are domain;
-> `InMemoryBillRepository` is data; `BillsBloc`, pages and `BillTile` are
+> `FakeBillRepository` is data; `BillsBloc`, pages and `BillTile` are
 > presentation. Domain imports no Flutter code.
 
 **Q: Why use cases if they only call the repository?**
@@ -185,24 +185,25 @@ tap → event → bloc → use case → repository (interface)
 > dashboard and list both rebuild. No manual copying between screens.
 
 **Q: How is the backend wired?**
-> Through `ApiService` → `AuthApi`/`BillApi` → `ApiAuthRepository`/`ApiBillRepository`,
+> Through `ApiService` → `AuthRemoteDataSource`/`BillRemoteDataSource` → `AuthRepositoryImpl`/`BillRepositoryImpl`,
 > with `MockClient` tests for every status branch. All paths live in
 > `ApiEndpoints`; `BillMapper` owns the JSON rules (rupees as strings, ISO
 > dates, ten category slugs, whole-line amounts). Swapping a repository is one
 > line in `AppDependencies`; pages and blocs stay untouched. That is exactly how
-> offline support landed: `OfflineBillRepository` wraps the API repository, so
-> no bloc, page or use case changed.
+> offline support landed: the cache, the upload queue and the guest path live
+> in one `BillRepositoryImpl`, so no bloc, page or use case changed.
 
 **Q: How does persistence work?**
 > Two stores for two jobs. The session (tokens + profile) goes through
-> `SessionStorage` to SharedPreferences and is restored before `runApp`; tests
-> use the in-memory implementation. Bills go to SQLite through
-> `BillLocalStore`: `SqliteBillStore` on mobile, `MemoryBillStore` in tests and
-> on web/desktop. Each row is partitioned by `owner_id`, so two accounts on one
+> `AuthSessionStorage` to SharedPreferences and is restored before `runApp`; tests
+> use the in-memory implementation. Bills go to one SQLite database through
+> the `AppDatabase` service: the real file on mobile, an in-memory database with
+> the same schema in tests, and no database at all on web/desktop (those builds
+> skip the cache). Each row is partitioned by `owner_id`, so two accounts on one
 > phone never share a cache.
 
 **Q: Walk me through an offline save.**
-> Review dispatches `SaveBill` → `OfflineBillRepository.save` →
+> Review dispatches `SaveBill` → `BillRepositoryImpl.save` →
 > `POST /bills/confirm`. A connection or timeout failure becomes
 > `BillFailure.offline`; the repository stores the bill with a `local-…` id and
 > `sync_status = 'pending'` and returns it as saved. The review screen sees
@@ -220,7 +221,7 @@ tap → event → bloc → use case → repository (interface)
 
 **Q: How do you test SQL without a device?**
 > `sqflite_common_ffi` opens a real in-memory SQLite database in a Dart VM test
-> with the production schema (`BillDatabase.open(factory: databaseFactoryFfi)`).
+> with the production schema (`AppDatabase.open(factory: databaseFactoryFfi)`).
 > The ten tests cover create statements/indexes, ordering, owner partitioning,
 > the pending filter, refresh-keeps-queue, cascade on promotion, reopening a
 > closed file and item replacement. `docs/SQL_GUIDE.md` is the write-up and practice book for those
@@ -245,7 +246,7 @@ tap → event → bloc → use case → repository (interface)
 > persisted bill.
 
 **Q: JSON/serialization?**
-> Both features have handwritten mappers in data: `AuthTokens`/`ApiUser` for the
+> Both features have handwritten mappers in data: `AuthTokens`/`UserModel` for the
 > five auth responses and `BillMapper` for the three bill routes. Domain entities
 > never see transport shapes. A row mapper (`BillRowMapper`) does the same for
 > SQLite, so a column rename never leaks above the data layer. At this size,
@@ -293,11 +294,11 @@ tap → event → bloc → use case → repository (interface)
 
 **Q: What is your testing strategy?**
 > Two levels. Widget tests drive the real UI and blocs with instant in-memory
-> repositories (and one `ApiAuthRepository` backed by `MockClient`), covering
+> repositories (and one `AuthRepositoryImpl` backed by `MockClient`), covering
 > auth validation and success, session restore, guest entry, tab switching,
 > search/filtering, the scan state progression, review validation, items,
 > save/reload, sign-out, duplicate emails and no-overflow at three widths. Unit
-> tests call `ApiService`, `AuthApi`/`ApiAuthRepository`, `BillApi`, the token
+> tests call `ApiService`, `AuthRemoteDataSource`/`AuthRepositoryImpl`, `BillRemoteDataSource`, the session
 > store and the scan repository directly: 401/409/413/415/422/429/5xx, timeout,
 > offline, malformed JSON, multipart, token attach/restore, refresh rotation,
 > best-effort logout, list/extract/confirm mapping and 422 problem propagation.
@@ -358,7 +359,7 @@ tap → event → bloc → use case → repository (interface)
 ```dart
 Future<void> _run(
   Emitter<AuthState> emit,
-  Future<AppUser> Function() request,
+  Future<User> Function() request,
 ) async {
   emit(const AuthLoading());
   try {
@@ -436,17 +437,22 @@ runApp(BillScannerApp(dependencies: deps));
 
 // network test: the real repository, a MockClient instead of the socket
 AppDependencies(
-  authRepository: ApiAuthRepository(
-    authApi: AuthApi(ApiService(baseUrl: ..., client: MockClient(...))),
-    tokens: AuthTokenStore(),
+  authRepository: AuthRepositoryImpl(
+    remote: AuthRemoteDataSource(ApiService(baseUrl: ..., client: MockClient(...))),
+    session: AuthSessionStore(),
   ),
 )
 
-// widget tests: instant fakes
+// widget tests: instant fakes, an in-memory camera and a guest scanner
 AppDependencies(
-  authRepository: InMemoryAuthRepository(latency: Duration.zero),
-  billRepository: InMemoryBillRepository(latency: Duration.zero),
-  scanRepository: SimulatedScanRepository(latency: const Duration(milliseconds: 120)),
+  authRepository: FakeAuthRepository(latency: Duration.zero),
+  billRepository: FakeBillRepository(latency: Duration.zero),
+  scanRepository: ScanRepositoryImpl(
+    bills: bills,
+    hasSession: () => false,
+    guestLatency: const Duration(milliseconds: 120),
+  ),
+  createCamera: FakeCameraDriver.new,
 )
 ```
 
@@ -498,9 +504,10 @@ final Object? json = await _api.post(
 
 The call site is one line because `ApiService` owns the base URL, JSON
 encoding/decoding, `Authorization: Bearer …` when `authenticated: true`, the
-timeout, and turning 401/409/422/429/5xx into typed exceptions. `AuthApi` owns
-the URLs and field names; `ApiAuthRepository` turns exceptions into
-`AuthFailure`s. Blocs never import `package:http`.
+timeout, and turning 401/409/422/429/5xx into typed exceptions. `AuthRemoteDataSource` owns
+the URLs, the field names and the status codes; it turns exceptions into
+`AuthFailure`s, so `AuthRepositoryImpl` only decides what a failure means for
+the stored session. Blocs never import `package:http`.
 
 Talking point: swapping `get/post/put/delete` for another transport means
 rewriting one file and its tests, not every data source.
@@ -514,7 +521,7 @@ rewriting one file and its tests, not every data source.
 > "Add-a-bill has four entry points: camera, library, manual and a sample. The
 > camera route creates a route-scoped ScanBloc and receives a ScanSource. Its
 > idle state is the permission sheet; the primary action picks a photo with
-> image_picker and emits Scanning, ApiScanRepository sends the bytes to
+> image_picker and emits Scanning, ScanRepositoryImpl sends the bytes to
 > /bills/extract, and ScanCaptured pushes review with the draft and problems.
 > If the scan fails, the page shows a snack bar and resets. The frame is a
 > CustomPainter — thin outline, mid guide, four accent brackets — and the sheet
@@ -577,12 +584,12 @@ rewriting one file and its tests, not every data source.
 | Post-login screens | 5 |
 | Auth screens | 3 |
 | Features | 5 (`auth`, `bills`, `home`, `scan`, `review`) |
-| Dart files in `lib` | 110 |
-| Lines in `lib` | ≈ 10,280 |
+| Dart files in `lib` | 97 |
+| Lines in `lib` | ≈ 9,850 |
 | Shared widgets (core) | 13 |
 | Widget tests | 19 |
-| Unit tests | 72 |
-| Total tests | 91 (all passing) |
+| Unit tests | 75 |
+| Total tests | 94 (all passing) |
 | SQLite tables / indexes | 2 / 3 |
 | Analyzer issues | 0 |
 | Integrated API endpoints | 8 (5 auth, 3 bills) |

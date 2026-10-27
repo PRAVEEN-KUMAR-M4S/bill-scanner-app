@@ -5,9 +5,9 @@ import '../entities/scan_source.dart';
 
 /// Source of the photos that turn into a bill.
 ///
-/// [ApiScanRepository] picks a photo and calls the bill scanner; the simulated
-/// implementation returns the bundled sample so tests and previews need no
-/// camera or plugin.
+/// `ScanRepositoryImpl` is the only implementation: a signed-in session picks a
+/// photo and lets the bill scanner read it, while a guest gets the bundled
+/// sample so the flow still works without an account.
 abstract interface class ScanRepository {
   /// Lets the person choose a photo and returns the scanner's draft.
   ///

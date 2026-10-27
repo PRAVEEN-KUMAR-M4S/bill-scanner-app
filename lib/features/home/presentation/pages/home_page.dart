@@ -13,7 +13,7 @@ import '../../../../core/widgets/paper_card.dart';
 import '../../../../core/widgets/paper_icon_button.dart';
 import '../../../../core/widgets/section_heading.dart';
 import '../../../../core/widgets/section_label.dart';
-import '../../../auth/domain/entities/app_user.dart';
+import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/bloc/auth_event.dart';
 import '../../../auth/presentation/bloc/auth_state.dart';
@@ -23,6 +23,7 @@ import '../../../bills/presentation/bloc/bills_bloc.dart';
 import '../../../bills/presentation/bloc/bills_event.dart';
 import '../../../bills/presentation/bloc/bills_state.dart';
 import '../../../bills/presentation/widgets/bill_tile.dart';
+import '../../../bills/presentation/widgets/sync_status_banner.dart';
 import '../../../scan/presentation/pages/add_bill_page.dart';
 
 /// Signed-in dashboard: this month's spend, the seven-day strip, a shortcut
@@ -84,6 +85,14 @@ class HomePage extends StatelessWidget {
     final List<Bill> recent = state.recent();
 
     return <Widget>[
+      if (state.needsSyncNotice) ...<Widget>[
+        SyncStatusBanner(
+          isOffline: state.isOffline,
+          pendingCount: state.pendingCount,
+          onRetry: () => context.read<BillsBloc>().add(const BillsReloaded()),
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
       _SpendingCard(summary: summary),
       const SizedBox(height: AppSpacing.md + 2),
       ActionTile(
@@ -114,9 +123,7 @@ class HomePage extends StatelessWidget {
 
   Future<void> _showProfile(BuildContext context) async {
     final AuthState authState = context.read<AuthBloc>().state;
-    final AppUser? user = authState is AuthAuthenticated
-        ? authState.user
-        : null;
+    final User? user = authState is AuthAuthenticated ? authState.user : null;
 
     final bool? signOut = await showModalBottomSheet<bool>(
       context: context,

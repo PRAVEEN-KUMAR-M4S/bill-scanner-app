@@ -1,11 +1,11 @@
 import 'dart:convert';
 
 import 'package:bill_scanner/core/network/api_service.dart';
-import 'package:bill_scanner/features/auth/data/datasources/auth_api.dart';
+import 'package:bill_scanner/features/auth/data/datasources/auth_remote_datasource.dart';
 import 'package:bill_scanner/features/auth/data/models/auth_tokens.dart';
-import 'package:bill_scanner/features/auth/data/repositories/api_auth_repository.dart';
-import 'package:bill_scanner/features/auth/data/session/auth_token_store.dart';
-import 'package:bill_scanner/features/auth/domain/entities/app_user.dart';
+import 'package:bill_scanner/features/auth/data/repositories/auth_repository_impl.dart';
+import 'package:bill_scanner/features/auth/data/session/auth_session_store.dart';
+import 'package:bill_scanner/features/auth/domain/entities/user.dart';
 import 'package:bill_scanner/features/auth/domain/entities/auth_provider.dart';
 import 'package:bill_scanner/features/auth/domain/failures/auth_failure.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,19 +13,19 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
-  late AuthTokenStore tokens;
+  late AuthSessionStore session;
 
-  ApiAuthRepository repositoryWith(MockClient client) {
-    tokens = AuthTokenStore();
-    return ApiAuthRepository(
-      authApi: AuthApi(
+  AuthRepositoryImpl repositoryWith(MockClient client) {
+    session = AuthSessionStore();
+    return AuthRepositoryImpl(
+      remote: AuthRemoteDataSource(
         ApiService(
           baseUrl: Uri.parse('http://api.test'),
           client: client,
-          accessToken: () async => tokens.accessToken,
+          accessToken: () async => session.accessToken,
         ),
       ),
-      tokens: tokens,
+      session: session,
     );
   }
 
@@ -37,10 +37,10 @@ void main() {
     );
   }
 
-  group('ApiAuthRepository', () {
-    test('sign in stores the tokens and loads the profile', () async {
+  group('AuthRepositoryImpl', () {
+    test('sign in stores the session and loads the profile', () async {
       final List<String> calls = <String>[];
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           calls.add('${request.method} ${request.url.path}');
           switch (request.url.path) {
@@ -65,7 +65,7 @@ void main() {
         }),
       );
 
-      final AppUser user = await repository.signIn(
+      final User user = await repository.signIn(
         email: '  asha.tiffins@billo.app ',
         password: 'secret123',
       );
@@ -73,14 +73,14 @@ void main() {
       expect(user.id, '7');
       expect(user.email, 'asha.tiffins@billo.app');
       expect(user.name, 'Asha Tiffins');
-      expect(tokens.accessToken, 'access-1');
-      expect(tokens.refreshToken, 'refresh-1');
+      expect(session.accessToken, 'access-1');
+      expect(session.refreshToken, 'refresh-1');
       expect(calls, <String>['POST /auth/login', 'GET /auth/me']);
     });
 
     test('register keeps the typed name for the new session', () async {
       final List<String> calls = <String>[];
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           calls.add('${request.method} ${request.url.path}');
           switch (request.url.path) {
@@ -109,14 +109,14 @@ void main() {
         }),
       );
 
-      final AppUser user = await repository.register(
+      final User user = await repository.register(
         name: 'Asha Tiffins',
         email: 'asha@billo.app',
         password: 'secret123',
       );
 
       expect(user.name, 'Asha Tiffins');
-      expect(tokens.hasSession, isTrue);
+      expect(session.hasSession, isTrue);
       expect(calls, <String>[
         'POST /auth/register',
         'POST /auth/login',
@@ -125,7 +125,7 @@ void main() {
     });
 
     test('a duplicate registration becomes a friendly failure', () async {
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           if (request.url.path == '/auth/register') {
             return jsonResponse(<String, dynamic>{
@@ -150,11 +150,11 @@ void main() {
           ),
         ),
       );
-      expect(tokens.hasSession, isFalse);
+      expect(session.hasSession, isFalse);
     });
 
     test('a rejected password reports invalid credentials', () async {
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           return jsonResponse(<String, dynamic>{
             'detail': 'Incorrect email or password',
@@ -172,11 +172,11 @@ void main() {
           ),
         ),
       );
-      expect(tokens.hasSession, isFalse);
+      expect(session.hasSession, isFalse);
     });
 
     test('field validation from the server reaches the form', () async {
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           return jsonResponse(<String, dynamic>{
             'detail': <Map<String, dynamic>>[
@@ -207,7 +207,7 @@ void main() {
     });
 
     test('an unreachable server explains the connection problem', () async {
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           throw http.ClientException('offline');
         }),
@@ -225,15 +225,15 @@ void main() {
       );
     });
 
-    test('sign out revokes the session and clears the tokens', () async {
+    test('sign out revokes the session and clears the session', () async {
       late http.Request logout;
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           logout = request;
           return http.Response('', 204);
         }),
       );
-      tokens.save(
+      session.save(
         const AuthTokens(accessToken: 'access-1', refreshToken: 'refresh-1'),
       );
 
@@ -242,28 +242,28 @@ void main() {
       expect(jsonDecode(logout.body), <String, dynamic>{
         'refresh_token': 'refresh-1',
       });
-      expect(tokens.accessToken, isNull);
-      expect(tokens.refreshToken, isNull);
+      expect(session.accessToken, isNull);
+      expect(session.refreshToken, isNull);
     });
 
-    test('sign out still clears the tokens when the server is down', () async {
-      final ApiAuthRepository repository = repositoryWith(
+    test('sign out still clears the session when the server is down', () async {
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           throw http.ClientException('offline');
         }),
       );
-      tokens.save(
+      session.save(
         const AuthTokens(accessToken: 'access-1', refreshToken: 'refresh-1'),
       );
 
       await repository.signOut();
 
-      expect(tokens.hasSession, isFalse);
+      expect(session.hasSession, isFalse);
     });
 
     test('refresh rotates the stored pair', () async {
       late http.Request refresh;
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           refresh = request;
           return jsonResponse(<String, dynamic>{
@@ -272,7 +272,7 @@ void main() {
           });
         }),
       );
-      tokens.save(
+      session.save(
         const AuthTokens(accessToken: 'access-1', refreshToken: 'refresh-1'),
       );
 
@@ -282,28 +282,28 @@ void main() {
       expect(jsonDecode(refresh.body), <String, dynamic>{
         'refresh_token': 'refresh-1',
       });
-      expect(tokens.accessToken, 'access-2');
-      expect(tokens.refreshToken, 'refresh-2');
+      expect(session.accessToken, 'access-2');
+      expect(session.refreshToken, 'refresh-2');
     });
 
     test('a rejected refresh ends the session', () async {
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           return jsonResponse(<String, dynamic>{'detail': 'expired'}, 401);
         }),
       );
-      tokens.save(
+      session.save(
         const AuthTokens(accessToken: 'access-1', refreshToken: 'refresh-1'),
       );
 
       expect(await repository.refreshSession(), isFalse);
-      expect(tokens.hasSession, isFalse);
+      expect(session.hasSession, isFalse);
     });
 
     test(
       'provider sign-in reports that the backend does not offer it',
       () async {
-        final ApiAuthRepository repository = repositoryWith(
+        final AuthRepositoryImpl repository = repositoryWith(
           MockClient((http.Request request) async {
             fail('Provider sign-in must not make a request');
           }),
@@ -323,21 +323,21 @@ void main() {
     );
 
     test('guest mode stays local', () async {
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           fail('Guest mode must not make a request');
         }),
       );
 
-      final AppUser guest = await repository.continueAsGuest();
+      final User guest = await repository.continueAsGuest();
 
       expect(guest.isGuest, isTrue);
       expect(guest.email, isEmpty);
-      expect(tokens.hasSession, isFalse);
+      expect(session.hasSession, isFalse);
     });
 
     test('a malformed success body is reported as a server problem', () async {
-      final ApiAuthRepository repository = repositoryWith(
+      final AuthRepositoryImpl repository = repositoryWith(
         MockClient((http.Request request) async {
           return http.Response('not json', 200);
         }),

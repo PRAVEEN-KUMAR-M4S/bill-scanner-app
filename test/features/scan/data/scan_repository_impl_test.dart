@@ -4,15 +4,15 @@ import 'package:bill_scanner/features/bills/domain/entities/bill.dart';
 import 'package:bill_scanner/features/bills/domain/entities/bill_category.dart';
 import 'package:bill_scanner/features/bills/domain/entities/bill_extraction.dart';
 import 'package:bill_scanner/features/bills/domain/entities/bill_item.dart';
+import 'package:bill_scanner/features/bills/domain/entities/bills_snapshot.dart';
 import 'package:bill_scanner/features/bills/domain/repositories/bill_repository.dart';
-import 'package:bill_scanner/features/scan/data/repositories/api_scan_repository.dart';
-import 'package:bill_scanner/features/scan/data/repositories/session_scan_repository.dart';
+import 'package:bill_scanner/features/scan/data/repositories/scan_repository_impl.dart';
 import 'package:bill_scanner/features/scan/domain/entities/captured_photo.dart';
 import 'package:bill_scanner/features/scan/domain/entities/scan_source.dart';
-import 'package:bill_scanner/features/scan/domain/repositories/scan_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 
+/// Records what the scanner asked the bills repository to read.
 class _RecordingBillRepository implements BillRepository {
   int extractCalls = 0;
   List<int>? bytes;
@@ -20,7 +20,8 @@ class _RecordingBillRepository implements BillRepository {
   String? contentType;
 
   @override
-  Future<List<Bill>> fetchBills() async => const <Bill>[];
+  Future<BillsSnapshot> fetchBills() async =>
+      const BillsSnapshot(bills: <Bill>[], source: BillsSource.server);
 
   @override
   Future<Bill> save(Bill bill) async => bill;
@@ -48,63 +49,15 @@ class _RecordingBillRepository implements BillRepository {
   }
 }
 
-class _FakeScanRepository implements ScanRepository {
-  _FakeScanRepository(this.label);
-
-  final String label;
-  final List<ScanSource> calls = <ScanSource>[];
-
-  @override
-  Future<BillExtraction?> capture(ScanSource source) async {
-    calls.add(source);
-    return BillExtraction(
-      bill: Bill(
-        id: label,
-        merchant: label,
-        date: DateTime(2026, 10, 22),
-        total: 1,
-        category: BillCategory.other,
-        items: const <BillItem>[],
-      ),
-    );
-  }
-
-  @override
-  Future<BillExtraction> read(CapturedPhoto photo) async {
-    reads.add(photo);
-    return BillExtraction(
-      bill: Bill(
-        id: label,
-        merchant: label,
-        date: DateTime(2026, 10, 22),
-        total: 1,
-        category: BillCategory.other,
-        items: const <BillItem>[],
-      ),
-    );
-  }
-
-  final List<CapturedPhoto> reads = <CapturedPhoto>[];
-
-  @override
-  Bill get sampleBill => Bill(
-    id: label,
-    merchant: label,
-    date: DateTime(2026, 10, 22),
-    total: 1,
-    category: BillCategory.other,
-    items: const <BillItem>[],
-  );
-}
-
 void main() {
   test(
     'capture picks from the requested source and extracts the bytes',
     () async {
       final _RecordingBillRepository bills = _RecordingBillRepository();
       ImageSource? picked;
-      final ApiScanRepository scan = ApiScanRepository(
-        billRepository: bills,
+      final ScanRepositoryImpl scan = ScanRepositoryImpl(
+        bills: bills,
+        hasSession: () => true,
         pickImage: (ImageSource source) async {
           picked = source;
           return XFile.fromData(
@@ -128,8 +81,9 @@ void main() {
   );
 
   test('camera source reaches the camera picker', () async {
-    final ApiScanRepository scan = ApiScanRepository(
-      billRepository: _RecordingBillRepository(),
+    final ScanRepositoryImpl scan = ScanRepositoryImpl(
+      bills: _RecordingBillRepository(),
+      hasSession: () => true,
       pickImage: (ImageSource source) async {
         expect(source, ImageSource.camera);
         return null;
@@ -139,30 +93,11 @@ void main() {
     expect(await scan.capture(ScanSource.camera), isNull);
   });
 
-  test('the session scanner picks the API only when signed in', () async {
-    bool signedIn = false;
-    final _FakeScanRepository remote = _FakeScanRepository('remote');
-    final _FakeScanRepository local = _FakeScanRepository('local');
-    final SessionScanRepository scan = SessionScanRepository(
-      signedIn: remote,
-      guest: local,
-      hasSession: () => signedIn,
-    );
-
-    expect((await scan.capture(ScanSource.gallery))?.bill.id, 'local');
-    expect(scan.sampleBill.id, 'local');
-
-    signedIn = true;
-    expect((await scan.capture(ScanSource.camera))?.bill.id, 'remote');
-    expect(scan.sampleBill.id, 'remote');
-    expect(local.calls, <ScanSource>[ScanSource.gallery]);
-    expect(remote.calls, <ScanSource>[ScanSource.camera]);
-  });
-
   test('cancelling the picker sends nothing to the scanner', () async {
     final _RecordingBillRepository bills = _RecordingBillRepository();
-    final ApiScanRepository scan = ApiScanRepository(
-      billRepository: bills,
+    final ScanRepositoryImpl scan = ScanRepositoryImpl(
+      bills: bills,
+      hasSession: () => true,
       pickImage: (ImageSource source) async => null,
     );
 
@@ -174,7 +109,10 @@ void main() {
     'read sends an already-captured photo straight to the scanner',
     () async {
       final _RecordingBillRepository bills = _RecordingBillRepository();
-      final ApiScanRepository scan = ApiScanRepository(billRepository: bills);
+      final ScanRepositoryImpl scan = ScanRepositoryImpl(
+        bills: bills,
+        hasSession: () => true,
+      );
 
       final BillExtraction report = await scan.read(
         const CapturedPhoto(bytes: <int>[9, 8, 7], filename: 'capture.jpg'),
@@ -188,25 +126,71 @@ void main() {
     },
   );
 
-  test('the session scanner reads through the active repository', () async {
-    bool signedIn = false;
-    final _FakeScanRepository remote = _FakeScanRepository('remote');
-    final _FakeScanRepository local = _FakeScanRepository('local');
-    final SessionScanRepository scan = SessionScanRepository(
-      signedIn: remote,
-      guest: local,
-      hasSession: () => signedIn,
-    );
-    const CapturedPhoto photo = CapturedPhoto(
-      bytes: <int>[1],
-      filename: 'bill.jpg',
+  test('a guest gets the bundled sample without a picker or the API', () async {
+    final _RecordingBillRepository bills = _RecordingBillRepository();
+    bool picked = false;
+    final ScanRepositoryImpl scan = ScanRepositoryImpl(
+      bills: bills,
+      hasSession: () => false,
+      guestLatency: Duration.zero,
+      pickImage: (ImageSource source) async {
+        picked = true;
+        return null;
+      },
     );
 
-    expect((await scan.read(photo)).bill.id, 'local');
+    final BillExtraction? captured = await scan.capture(ScanSource.camera);
+
+    expect(picked, isFalse);
+    expect(captured?.bill.merchant, 'Asha Tiffins');
+    expect(scan.sampleBill.merchant, 'Asha Tiffins');
+
+    final BillExtraction read = await scan.read(
+      const CapturedPhoto(bytes: <int>[1], filename: 'bill.jpg'),
+    );
+    expect(read.bill.merchant, 'Asha Tiffins');
+    expect(bills.extractCalls, 0);
+  });
+
+  test('an image/png photo keeps its content type', () async {
+    final _RecordingBillRepository bills = _RecordingBillRepository();
+    final ScanRepositoryImpl scan = ScanRepositoryImpl(
+      bills: bills,
+      hasSession: () => true,
+      pickImage: (ImageSource source) async => XFile.fromData(
+        Uint8List.fromList(<int>[1]),
+        name: 'bill.png',
+        path: 'bill.png',
+      ),
+    );
+
+    await scan.capture(ScanSource.gallery);
+
+    expect(bills.contentType, 'image/png');
+  });
+
+  test('the session is read per call, not once at construction', () async {
+    bool signedIn = false;
+    final _RecordingBillRepository bills = _RecordingBillRepository();
+    final ScanRepositoryImpl scan = ScanRepositoryImpl(
+      bills: bills,
+      hasSession: () => signedIn,
+      guestLatency: Duration.zero,
+      pickImage: (ImageSource source) async => XFile.fromData(
+        Uint8List.fromList(<int>[1]),
+        name: 'bill.jpg',
+        path: 'bill.jpg',
+      ),
+    );
+
+    expect(
+      (await scan.capture(ScanSource.gallery))?.bill.merchant,
+      'Asha Tiffins',
+    );
+    expect(bills.extractCalls, 0);
 
     signedIn = true;
-    expect((await scan.read(photo)).bill.id, 'remote');
-    expect(local.reads, <CapturedPhoto>[photo]);
-    expect(remote.reads, <CapturedPhoto>[photo]);
+    expect((await scan.capture(ScanSource.gallery))?.bill.merchant, 'Lulu');
+    expect(bills.extractCalls, 1);
   });
 }

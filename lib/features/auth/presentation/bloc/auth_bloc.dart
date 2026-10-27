@@ -1,10 +1,10 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 
-import '../../domain/entities/app_user.dart';
+import '../../domain/entities/user.dart';
 import '../../domain/failures/auth_failure.dart';
 import '../../domain/usecases/continue_as_guest.dart';
-import '../../domain/usecases/register_account.dart';
-import '../../domain/usecases/sign_in_with_email.dart';
+import '../../domain/usecases/register.dart';
+import '../../domain/usecases/login.dart';
 import '../../domain/usecases/sign_in_with_provider.dart';
 import '../../domain/usecases/sign_out.dart';
 import 'auth_event.dart';
@@ -12,14 +12,14 @@ import 'auth_state.dart';
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
   AuthBloc({
-    required SignInWithEmail signInWithEmail,
-    required RegisterAccount registerAccount,
+    required Login login,
+    required Register register,
     required SignInWithProvider signInWithProvider,
     required ContinueAsGuest continueAsGuest,
     required SignOut signOut,
-    AppUser? restoredUser,
-  }) : _signInWithEmail = signInWithEmail,
-       _registerAccount = registerAccount,
+    User? restoredUser,
+  }) : _login = login,
+       _register = register,
        _signInWithProvider = signInWithProvider,
        _continueAsGuest = continueAsGuest,
        _signOut = signOut,
@@ -35,8 +35,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthSignOutRequested>(_onSignOutRequested);
   }
 
-  final SignInWithEmail _signInWithEmail;
-  final RegisterAccount _registerAccount;
+  final Login _login;
+  final Register _register;
   final SignInWithProvider _signInWithProvider;
   final ContinueAsGuest _continueAsGuest;
   final SignOut _signOut;
@@ -47,7 +47,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) {
     return _run(
       emit,
-      () => _signInWithEmail(email: event.email, password: event.password),
+      () => _login(email: event.email, password: event.password),
     );
   }
 
@@ -57,7 +57,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   ) {
     return _run(
       emit,
-      () => _registerAccount(
+      () => _register(
         name: event.name,
         email: event.email,
         password: event.password,
@@ -95,7 +95,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   Future<void> _run(
     Emitter<AuthState> emit,
-    Future<AppUser> Function() request,
+    Future<User> Function() request,
   ) async {
     emit(const AuthLoading());
     try {

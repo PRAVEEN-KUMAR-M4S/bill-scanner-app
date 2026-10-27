@@ -2,6 +2,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../domain/entities/bill.dart';
 import '../../domain/entities/bill_category.dart';
+import '../../domain/entities/bills_snapshot.dart';
 import '../../domain/failures/bill_failure.dart';
 import '../../domain/usecases/fetch_bills.dart';
 import 'bills_event.dart';
@@ -21,6 +22,7 @@ class BillsBloc extends Bloc<BillsEvent, BillsState> {
   final FetchBills _fetchBills;
 
   List<Bill> _bills = const <Bill>[];
+  BillsSource _source = BillsSource.server;
   String _query = '';
   BillCategory? _category;
 
@@ -46,7 +48,9 @@ class BillsBloc extends Bloc<BillsEvent, BillsState> {
 
   Future<void> _load(Emitter<BillsState> emit) async {
     try {
-      _bills = await _fetchBills();
+      final BillsSnapshot snapshot = await _fetchBills();
+      _bills = snapshot.bills;
+      _source = snapshot.source;
       emit(_loaded());
     } on BillFailure catch (failure) {
       emit(BillsFailure(failure.message));
@@ -74,6 +78,7 @@ class BillsBloc extends Bloc<BillsEvent, BillsState> {
     return BillsLoaded(
       bills: List<Bill>.unmodifiable(_bills),
       visibleBills: List<Bill>.unmodifiable(_bills.where(_matches).toList()),
+      source: _source,
       query: _query,
       category: _category,
     );

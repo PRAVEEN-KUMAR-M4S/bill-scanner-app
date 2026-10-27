@@ -5,21 +5,19 @@ import 'package:bill_scanner/core/di/injector.dart';
 import 'package:bill_scanner/core/navigation/app_shell.dart';
 import 'package:bill_scanner/core/network/api_service.dart';
 import 'package:bill_scanner/core/widgets/paper_checkbox.dart';
-import 'package:bill_scanner/features/auth/data/datasources/auth_api.dart';
-import 'package:bill_scanner/features/auth/data/repositories/api_auth_repository.dart';
-import 'package:bill_scanner/features/auth/data/repositories/in_memory_auth_repository.dart';
-import 'package:bill_scanner/features/auth/data/session/auth_token_store.dart';
-import 'package:bill_scanner/features/auth/domain/entities/app_user.dart';
+import 'package:bill_scanner/features/auth/data/datasources/auth_remote_datasource.dart';
+import 'package:bill_scanner/features/auth/data/repositories/auth_repository_impl.dart';
+import 'package:bill_scanner/features/auth/data/session/auth_session_store.dart';
+import 'package:bill_scanner/features/auth/domain/entities/user.dart';
+import 'package:bill_scanner/features/auth/domain/repositories/auth_repository.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/register_page.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/sign_in_page.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/welcome_page.dart';
-import 'package:bill_scanner/features/bills/data/repositories/in_memory_bill_repository.dart';
 import 'package:bill_scanner/features/bills/presentation/pages/bills_page.dart';
 import 'package:bill_scanner/features/home/presentation/pages/home_page.dart';
 import 'package:bill_scanner/features/review/presentation/pages/review_page.dart';
-import 'package:bill_scanner/features/scan/data/repositories/simulated_scan_repository.dart';
+import 'package:bill_scanner/features/scan/data/repositories/scan_repository_impl.dart';
 import 'package:bill_scanner/features/scan/presentation/camera/camera_driver.dart';
-import 'package:bill_scanner/features/scan/presentation/camera/simulated_camera_driver.dart';
 import 'package:bill_scanner/features/scan/presentation/pages/add_bill_page.dart';
 import 'package:bill_scanner/features/scan/presentation/pages/scan_page.dart';
 import 'package:flutter/material.dart';
@@ -28,18 +26,28 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'support/fake_auth_repository.dart';
+import 'support/fake_bill_repository.dart';
+import 'support/fake_camera_driver.dart';
+
 Widget buildApp({
-  AppUser? restoredUser,
+  User? restoredUser,
   CameraDriver Function()? createCamera,
+  AuthRepository? authRepository,
 }) {
+  final FakeBillRepository bills = FakeBillRepository(latency: Duration.zero);
+
   return BillScannerApp(
     dependencies: AppDependencies(
-      authRepository: InMemoryAuthRepository(latency: Duration.zero),
-      billRepository: InMemoryBillRepository(latency: Duration.zero),
-      scanRepository: SimulatedScanRepository(
-        latency: const Duration(milliseconds: 120),
+      authRepository:
+          authRepository ?? FakeAuthRepository(latency: Duration.zero),
+      billRepository: bills,
+      scanRepository: ScanRepositoryImpl(
+        bills: bills,
+        hasSession: () => false,
+        guestLatency: const Duration(milliseconds: 120),
       ),
-      createCamera: createCamera,
+      createCamera: createCamera ?? FakeCameraDriver.new,
       restoredUser: restoredUser,
     ),
   );
@@ -62,7 +70,7 @@ Finder navTab(String label) {
 Future<void> pumpApp(
   WidgetTester tester, {
   Size size = const Size(390, 844),
-  AppUser? restoredUser,
+  User? restoredUser,
   CameraDriver Function()? createCamera,
 }) async {
   await tester.binding.setSurfaceSize(size);
@@ -142,7 +150,7 @@ void main() {
   ) async {
     await pumpApp(
       tester,
-      restoredUser: const AppUser(
+      restoredUser: const User(
         id: '7',
         name: 'Asha Tiffins',
         email: 'asha@billo.app',
@@ -198,12 +206,12 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.binding.setSurfaceSize(const Size(390, 844));
 
-    final AuthTokenStore tokens = AuthTokenStore();
-    final ApiAuthRepository repository = ApiAuthRepository(
-      authApi: AuthApi(
+    final AuthSessionStore session = AuthSessionStore();
+    final AuthRepositoryImpl repository = AuthRepositoryImpl(
+      remote: AuthRemoteDataSource(
         ApiService(
           baseUrl: Uri.parse('http://api.test'),
-          accessToken: () async => tokens.accessToken,
+          accessToken: () async => session.accessToken,
           client: MockClient((http.Request request) async {
             switch (request.url.path) {
               case '/auth/login':
@@ -229,12 +237,10 @@ void main() {
           }),
         ),
       ),
-      tokens: tokens,
+      session: session,
     );
 
-    await tester.pumpWidget(
-      BillScannerApp(dependencies: AppDependencies(authRepository: repository)),
-    );
+    await tester.pumpWidget(buildApp(authRepository: repository));
     await tester.pumpAndSettle();
 
     await tester.tap(inPage(WelcomePage, find.text('Sign In')));
@@ -250,7 +256,7 @@ void main() {
       inPage(HomePage, find.text('Your spending,\nat a glance.')),
       findsOneWidget,
     );
-    expect(tokens.hasSession, isTrue);
+    expect(session.hasSession, isTrue);
   });
 
   testWidgets('register requires terms and a strong password', (
@@ -366,7 +372,7 @@ void main() {
   testWidgets('a refused camera explains itself and can be retried', (
     WidgetTester tester,
   ) async {
-    final SimulatedCameraDriver camera = SimulatedCameraDriver(
+    final FakeCameraDriver camera = FakeCameraDriver(
       statusOnOpen: CameraStatus.denied,
     );
     await pumpApp(tester, createCamera: () => camera);

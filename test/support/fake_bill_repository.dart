@@ -1,14 +1,17 @@
-import '../../domain/entities/bill.dart';
-import '../../domain/entities/bill_extraction.dart';
-import '../../domain/repositories/bill_repository.dart';
-import '../sample_bill.dart';
+import 'package:bill_scanner/features/bills/data/sample_bill.dart';
+import 'package:bill_scanner/features/bills/domain/entities/bill.dart';
+import 'package:bill_scanner/features/bills/domain/entities/bill_extraction.dart';
+import 'package:bill_scanner/features/bills/domain/entities/bill_sync_state.dart';
+import 'package:bill_scanner/features/bills/domain/entities/bills_snapshot.dart';
+import 'package:bill_scanner/features/bills/domain/repositories/bill_repository.dart';
 
-/// In-memory stand-in for the bills backend.
+/// In-memory stand-in for the bills backend, used by widget tests.
 ///
-/// Starts with the single bill shown in the design and keeps saved bills in
-/// memory, newest first, so the dashboard and the list react to a new bill.
-class InMemoryBillRepository implements BillRepository {
-  InMemoryBillRepository({
+/// Starts with the bill shown in the design and keeps saved bills in memory,
+/// newest first, so the dashboard and the list react to a new bill without a
+/// network or a database.
+class FakeBillRepository implements BillRepository {
+  FakeBillRepository({
     this.latency = const Duration(milliseconds: 350),
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now {
@@ -23,9 +26,12 @@ class InMemoryBillRepository implements BillRepository {
   int _nextId = 0;
 
   @override
-  Future<List<Bill>> fetchBills() async {
+  Future<BillsSnapshot> fetchBills() async {
     await Future<void>.delayed(latency);
-    return List<Bill>.unmodifiable(_bills);
+    return BillsSnapshot(
+      bills: List<Bill>.unmodifiable(_bills),
+      source: BillsSource.device,
+    );
   }
 
   @override
@@ -45,6 +51,7 @@ class InMemoryBillRepository implements BillRepository {
     final Bill saved = bill.copyWith(
       id: bill.isSaved ? bill.id : 'bill-${++_nextId}',
       isSample: false,
+      syncState: BillSyncState.synced,
     );
 
     final int existing = _bills.indexWhere((Bill b) => b.id == saved.id);

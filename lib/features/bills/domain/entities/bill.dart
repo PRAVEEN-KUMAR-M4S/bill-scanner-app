@@ -2,11 +2,13 @@ import 'package:equatable/equatable.dart';
 
 import 'bill_category.dart';
 import 'bill_item.dart';
+import 'bill_sync_state.dart';
 
 /// A saved (or in-progress) bill.
 ///
 /// [id] is empty until the bill has been saved; [isSample] marks the bundled
-/// demo bill so the review screen can explain where the values came from.
+/// demo bill so the review screen can explain where the values came from;
+/// [syncState] says whether the server has stored it yet.
 class Bill extends Equatable {
   const Bill({
     required this.id,
@@ -20,6 +22,7 @@ class Bill extends Equatable {
     this.icon,
     this.notes,
     this.isSample = false,
+    this.syncState = BillSyncState.synced,
   });
 
   /// A blank bill for manual entry.
@@ -50,7 +53,13 @@ class Bill extends Equatable {
   final String? notes;
   final bool isSample;
 
+  /// `synced` for a bill the server has stored, `pending` for one that is
+  /// waiting in the device's upload queue.
+  final BillSyncState syncState;
+
   bool get isSaved => id.isNotEmpty;
+
+  bool get isPendingSync => syncState == BillSyncState.pending;
 
   /// The icon to send on confirm: the one the API chose, or the category's
   /// default for a manually entered bill.
@@ -74,6 +83,7 @@ class Bill extends Equatable {
     String? icon,
     String? notes,
     bool? isSample,
+    BillSyncState? syncState,
   }) {
     return Bill(
       id: id ?? this.id,
@@ -87,6 +97,7 @@ class Bill extends Equatable {
       icon: icon ?? this.icon,
       notes: notes ?? this.notes,
       isSample: isSample ?? this.isSample,
+      syncState: syncState ?? this.syncState,
     );
   }
 
@@ -103,5 +114,6 @@ class Bill extends Equatable {
     icon,
     notes,
     isSample,
+    syncState,
   ];
 }

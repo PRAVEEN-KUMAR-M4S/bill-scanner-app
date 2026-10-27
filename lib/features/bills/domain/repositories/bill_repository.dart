@@ -1,15 +1,28 @@
 import '../entities/bill.dart';
 import '../entities/bill_extraction.dart';
+import '../entities/bills_snapshot.dart';
 
 /// Storage and extraction contract for bills.
 ///
-/// Implemented by the API repository in production and by an in-memory store
-/// in tests and previews.
+/// The app is offline-first, so the contract describes behaviour, not
+/// transport:
+/// - [fetchBills] returns the newest view it can get. On a device with a
+///   server account that means syncing queued bills, fetching the list, and
+///   falling back to the cache with [BillsSource.cache] when the network is
+///   down.
+/// - [save] returns a bill whose [Bill.syncState] says whether the server
+///   accepted it. A pending bill is already saved on this device and will be
+///   sent on the next successful sync.
+/// - [extract] needs the scanner, so it fails with [BillFailure.isOffline]
+///   when the connection is down; a photo cannot be read on-device.
+///
+/// The implementation is `BillRepositoryImpl`, which routes each call between
+/// the API, the SQLite cache and the guest's device store.
 abstract interface class BillRepository {
-  /// Every saved bill, newest first.
-  Future<List<Bill>> fetchBills();
+  /// The bill list plus where it came from, newest first.
+  Future<BillsSnapshot> fetchBills();
 
-  /// Confirms [bill] as a draft and returns the stored version with its id.
+  /// Persists [bill], either on the server or in the device queue.
   Future<Bill> save(Bill bill);
 
   /// Sends one JPG/PNG photo to the scanner and returns the draft plus the

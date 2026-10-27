@@ -1,14 +1,15 @@
-import '../../domain/entities/app_user.dart';
-import '../../domain/entities/auth_provider.dart';
-import '../../domain/failures/auth_failure.dart';
-import '../../domain/repositories/auth_repository.dart';
+import 'package:bill_scanner/features/auth/domain/entities/auth_provider.dart';
+import 'package:bill_scanner/features/auth/domain/entities/user.dart';
+import 'package:bill_scanner/features/auth/domain/failures/auth_failure.dart';
+import 'package:bill_scanner/features/auth/domain/repositories/auth_repository.dart';
 
-/// In-memory stand-in for the future account backend.
+/// In-memory stand-in for the account backend, used by widget tests.
 ///
-/// Enforces the same rules the real API will, so the presentation layer can be
-/// built and tested against realistic states (including failures).
-class InMemoryAuthRepository implements AuthRepository {
-  InMemoryAuthRepository({this.latency = const Duration(milliseconds: 700)});
+/// Enforces the same rules the API enforces (a duplicate email is refused, a
+/// short password is refused) so the presentation layer is tested against
+/// realistic states without a network.
+class FakeAuthRepository implements AuthRepository {
+  FakeAuthRepository({this.latency = const Duration(milliseconds: 700)});
 
   /// Simulated round-trip time.
   final Duration latency;
@@ -16,13 +17,10 @@ class InMemoryAuthRepository implements AuthRepository {
   final Set<String> _registeredEmails = <String>{};
 
   @override
-  Future<AppUser> signIn({
-    required String email,
-    required String password,
-  }) async {
+  Future<User> signIn({required String email, required String password}) async {
     await Future<void>.delayed(latency);
     _ensurePasswordIsStrong(password);
-    return AppUser(
+    return User(
       id: email.trim().toLowerCase(),
       name: _displayNameFromEmail(email),
       email: email.trim(),
@@ -30,7 +28,7 @@ class InMemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AppUser> register({
+  Future<User> register({
     required String name,
     required String email,
     required String password,
@@ -42,7 +40,7 @@ class InMemoryAuthRepository implements AuthRepository {
         'That email is already registered. Try signing in.',
       );
     }
-    return AppUser(
+    return User(
       id: email.trim().toLowerCase(),
       name: name.trim(),
       email: email.trim(),
@@ -50,9 +48,9 @@ class InMemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AppUser> signInWithProvider(AuthProvider provider) async {
+  Future<User> signInWithProvider(AuthProvider provider) async {
     await Future<void>.delayed(latency);
-    return AppUser(
+    return User(
       id: '${provider.name}-demo',
       name: '${_capitalize(provider.name)} User',
       email: 'you@${provider.name}.com',
@@ -60,14 +58,14 @@ class InMemoryAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AppUser> continueAsGuest() async {
+  Future<User> continueAsGuest() async {
     await Future<void>.delayed(latency);
-    return const AppUser(id: 'guest', name: 'Guest', email: '', isGuest: true);
+    return const User(id: 'guest', name: 'Guest', email: '', isGuest: true);
   }
 
   @override
-  Future<AppUser?> restoreSession() async {
-    // The in-memory fake starts signed out; it exists for tests and previews.
+  Future<User?> restoreSession() async {
+    // The fake starts signed out; tests pass `restoredUser` when they need one.
     return null;
   }
 

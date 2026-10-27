@@ -1,25 +1,24 @@
 import 'package:bill_scanner/features/auth/data/models/auth_tokens.dart';
-import 'package:bill_scanner/features/auth/data/session/auth_token_store.dart';
-import 'package:bill_scanner/features/auth/data/session/session_storage.dart';
-import 'package:bill_scanner/features/auth/data/session/shared_preferences_session_storage.dart';
-import 'package:bill_scanner/features/auth/domain/entities/app_user.dart';
+import 'package:bill_scanner/features/auth/data/session/auth_session_store.dart';
+import 'package:bill_scanner/features/auth/data/session/auth_session_storage.dart';
+import 'package:bill_scanner/features/auth/domain/entities/user.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  group('AuthTokenStore', () {
+  group('AuthSessionStore', () {
     test(
       'the SharedPreferences implementation survives a new instance',
       () async {
         SharedPreferences.setMockInitialValues(<String, Object>{});
         final SharedPreferences preferences =
             await SharedPreferences.getInstance();
-        final AuthTokenStore first = AuthTokenStore(
-          storage: SharedPreferencesSessionStorage(preferences),
+        final AuthSessionStore first = AuthSessionStore(
+          storage: SharedPreferencesAuthSessionStorage(preferences),
         );
-        const AppUser user = AppUser(
+        const User user = User(
           id: '7',
           name: 'Asha Tiffins',
           email: 'asha@billo.app',
@@ -31,8 +30,8 @@ void main() {
         );
 
         // A second read is what the next app launch does.
-        final AuthTokenStore restored = AuthTokenStore(
-          storage: SharedPreferencesSessionStorage(
+        final AuthSessionStore restored = AuthSessionStore(
+          storage: SharedPreferencesAuthSessionStorage(
             await SharedPreferences.getInstance(),
           ),
         );
@@ -47,8 +46,8 @@ void main() {
     test(
       'keeps the pair and profile in memory for the running session',
       () async {
-        final AuthTokenStore store = AuthTokenStore();
-        const AppUser user = AppUser(
+        final AuthSessionStore store = AuthSessionStore();
+        const User user = User(
           id: '7',
           name: 'Asha Tiffins',
           email: 'asha@billo.app',
@@ -68,9 +67,9 @@ void main() {
     );
 
     test('restores the session into a fresh store', () async {
-      final InMemorySessionStorage storage = InMemorySessionStorage();
-      final AuthTokenStore first = AuthTokenStore(storage: storage);
-      const AppUser user = AppUser(
+      final InMemoryAuthSessionStorage storage = InMemoryAuthSessionStorage();
+      final AuthSessionStore first = AuthSessionStore(storage: storage);
+      const User user = User(
         id: '7',
         name: 'Asha Tiffins',
         email: 'asha@billo.app',
@@ -80,7 +79,7 @@ void main() {
         user: user,
       );
 
-      final AuthTokenStore restored = AuthTokenStore(storage: storage);
+      final AuthSessionStore restored = AuthSessionStore(storage: storage);
       await restored.restore();
 
       expect(restored.accessToken, 'access-1');
@@ -90,9 +89,9 @@ void main() {
     });
 
     test('restores a guest session that has no tokens', () async {
-      final InMemorySessionStorage storage = InMemorySessionStorage();
-      final AuthTokenStore first = AuthTokenStore(storage: storage);
-      const AppUser guest = AppUser(
+      final InMemoryAuthSessionStorage storage = InMemoryAuthSessionStorage();
+      final AuthSessionStore first = AuthSessionStore(storage: storage);
+      const User guest = User(
         id: 'guest',
         name: 'Guest',
         email: '',
@@ -100,7 +99,7 @@ void main() {
       );
       await first.saveUser(guest);
 
-      final AuthTokenStore restored = AuthTokenStore(storage: storage);
+      final AuthSessionStore restored = AuthSessionStore(storage: storage);
       await restored.restore();
 
       expect(restored.hasSession, isFalse);
@@ -109,16 +108,16 @@ void main() {
     });
 
     test('clearing removes the tokens and the profile from storage', () async {
-      final InMemorySessionStorage storage = InMemorySessionStorage();
-      final AuthTokenStore store = AuthTokenStore(storage: storage);
+      final InMemoryAuthSessionStorage storage = InMemoryAuthSessionStorage();
+      final AuthSessionStore store = AuthSessionStore(storage: storage);
       await store.save(
         const AuthTokens(accessToken: 'access-1', refreshToken: 'refresh-1'),
-        user: const AppUser(id: '7', name: 'Asha', email: 'asha@billo.app'),
+        user: const User(id: '7', name: 'Asha', email: 'asha@billo.app'),
       );
 
       await store.clear();
 
-      final AuthTokenStore restored = AuthTokenStore(storage: storage);
+      final AuthSessionStore restored = AuthSessionStore(storage: storage);
       await restored.restore();
       expect(restored.hasSession, isFalse);
       expect(restored.isSignedIn, isFalse);
@@ -128,8 +127,8 @@ void main() {
     });
 
     test('a new store with empty storage is signed out', () async {
-      final AuthTokenStore store = AuthTokenStore(
-        storage: InMemorySessionStorage(),
+      final AuthSessionStore store = AuthSessionStore(
+        storage: InMemoryAuthSessionStorage(),
       );
       await store.restore();
 
