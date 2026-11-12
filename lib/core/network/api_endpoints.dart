@@ -1,28 +1,22 @@
-/// Every URL path the app talks to, in one place.
-///
-/// Paths are relative to [ApiConfig.baseUrl]. Keeping them here means a route
-/// rename is one edit, and no data source contains a hard-coded string.
-///
-/// The API is versioned by path (`/auth`, `/bills`); if a `/v1` prefix is added
-/// later, [prefix] changes once and every path follows.
+import 'api_config.dart';
+import 'api_urls.dart';
+
 abstract final class ApiEndpoints {
-  /// Common prefix for every endpoint. Empty while the API is unversioned.
-  static const String prefix = '';
+  static ApiUrls get _urls => ApiConfig.urls;
 
-  // --- Authentication ------------------------------------------------------
-  static const String authRegister = '$prefix/auth/register';
-  static const String authLogin = '$prefix/auth/login';
-  static const String authRefresh = '$prefix/auth/refresh';
-  static const String authLogout = '$prefix/auth/logout';
-  static const String authMe = '$prefix/auth/me';
+  static String get authRegister => _urls.authRegister;
 
-  // --- Bills ---------------------------------------------------------------
-  /// `GET` — every saved bill for the signed-in user.
-  static const String bills = '$prefix/bills';
+  static String get authLogin => _urls.authLogin;
 
-  /// `POST` multipart `file` — photo in, `{draft, problems}` out.
-  static const String billsExtract = '$prefix/bills/extract';
+  static String get authRefresh => _urls.authRefresh;
 
-  /// `POST` JSON `{draft}` — save only after the checks pass.
-  static const String billsConfirm = '$prefix/bills/confirm';
+  static String get authLogout => _urls.authLogout;
+
+  static String get authMe => _urls.authMe;
+
+  static String get bills => _urls.bills;
+
+  static String get billsExtract => _urls.billsExtract;
+
+  static String get billsConfirm => _urls.billsConfirm;
 }

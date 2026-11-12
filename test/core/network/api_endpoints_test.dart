@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('every endpoint is an absolute, unique path', () {
-    const List<String> endpoints = <String>[
+    final List<String> endpoints = <String>[
       ApiEndpoints.authRegister,
       ApiEndpoints.authLogin,
       ApiEndpoints.authRefresh,
