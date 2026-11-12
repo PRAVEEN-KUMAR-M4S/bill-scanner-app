@@ -167,15 +167,18 @@ no benefit at this size. Swapping in `get_it` later only touches
 ## 3. Running and verifying
 
 ```bash
-# terminal 1 — the Bill Reader API (its own README)
-uv run main.py                # http://127.0.0.1:8000
-
-# terminal 2 — the app
+# the app — talks to the deployed API by default
 flutter pub get
-flutter run -d chrome --dart-define=API_BASE_URL=http://127.0.0.1:8000
+flutter run -d chrome
 flutter test
 flutter analyze
 ```
+
+The deployed backend is
+`https://billing-software-backend-wip4.onrender.com`, chosen by `ApiConfig`
+through `ProdAPIUrls` (`lib/core/network/prod_api_urls.dart`). To run against a
+local API, add `--dart-define=API_BASE_URL=http://127.0.0.1:8000` (or
+`http://10.0.2.2:8000` on the Android emulator).
 
 Current verified state:
 
@@ -193,8 +196,10 @@ Current verified state:
 
 Notes:
 
-- `API_BASE_URL` defaults to `http://127.0.0.1:8000`; the define only matters
-  for another host. The Android emulator reaches the machine at `10.0.2.2`.
+- The default base URL is the deployed backend
+  (`https://billing-software-backend-wip4.onrender.com`); `API_BASE_URL`
+  overrides it, for example `http://127.0.0.1:8000` for a local API. The
+  Android emulator reaches the machine at `10.0.2.2`.
 - The browser enforces CORS. The FastAPI app must send
   `Access-Control-Allow-Origin` for the Flutter origin; the data layer is
   otherwise unchanged. Native targets do not have this constraint.
@@ -226,8 +231,10 @@ lib/
 │   │   ├── app_routes.dart       # route names shared across features
 │   │   └── app_shell.dart        # signed-in shell + bottom navigation
 │   ├── network/
-│   │   ├── api_config.dart       # base URL + --dart-define
-│   │   ├── api_endpoints.dart    # every backend path in one list
+│   │   ├── api_config.dart       # picks the ApiUrls implementation
+│   │   ├── api_urls.dart         # base URL + every path (contract)
+│   │   ├── prod_api_urls.dart    # deployed backend URLs
+│   │   ├── api_endpoints.dart    # static accessors over those paths
 │   │   ├── api_exception.dart    # sealed, user-safe failures
 │   │   └── api_service.dart      # four verbs + multipart, JSON, auth, errors
 │   ├── theme/
@@ -573,9 +580,11 @@ AuthPage → AuthBloc → SignInWithEmail → AuthRepository (domain)
                                                 ApiService ──> FastAPI
 ```
 
-**`ApiEndpoints`** (`lib/core/network/api_endpoints.dart`) is the only place a
-URL lives. `AuthRemoteDataSource` and `BillRemoteDataSource` build from it, so a route rename is one edit
-and no screen or repository knows a path.
+**`ApiUrls`** (`lib/core/network/api_urls.dart`) declares the base URL and every
+path; **`ProdAPIUrls`** (`lib/core/network/prod_api_urls.dart`) implements it for
+the deployed backend. `ApiConfig.urls` picks the implementation and
+`ApiEndpoints` re-exposes the paths, so `AuthRemoteDataSource` and
+`BillRemoteDataSource` build from one list and a route rename is one edit.
 
 **`ApiService`** (`lib/core/network/api_service.dart`) is the only class that
 touches `package:http`. It exposes the verbs the backend needs plus an upload:
@@ -1749,8 +1758,10 @@ bill" and list content) or use a demo clock.
 
 | File | Purpose |
 |---|---|
-| `core/network/api_config.dart` | Base URL, overridable with `--dart-define=API_BASE_URL` |
-| `core/network/api_endpoints.dart` | Every auth and bill path in one list |
+| `core/network/api_config.dart` | Selects the `ApiUrls` implementation; `--dart-define=API_BASE_URL` overrides it |
+| `core/network/api_urls.dart` | Base URL + endpoint contract |
+| `core/network/prod_api_urls.dart` | Deployed backend base URL and paths |
+| `core/network/api_endpoints.dart` | Static accessors over the configured paths |
 | `core/network/api_exception.dart` | Sealed network failures with user-safe messages |
 | `core/network/api_service.dart` | GET/POST/PUT/DELETE + multipart, JSON, bearer, timeout, errors |
 | `core/database/app_database.dart` | The on-device SQLite service: file, schema, every statement, transactions |

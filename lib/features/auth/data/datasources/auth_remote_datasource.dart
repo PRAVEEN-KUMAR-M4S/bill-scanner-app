@@ -21,6 +21,7 @@ class AuthRemoteDataSource {
     required String password,
   }) async {
     try {
+      print("jhjhfjhdj${ApiEndpoints.authLogin}");
       final Object? json = await _api.post(
         ApiEndpoints.authLogin,
         body: <String, Object?>{'email': email, 'password': password},

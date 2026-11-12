@@ -26,16 +26,19 @@ so the dashboard opens offline and saves wait in an upload queue.
 
 ## Run
 
-Start the Bill Reader API first (it listens on `http://127.0.0.1:8000`).
+The app points at the deployed Bill Reader API,
+`https://billing-software-backend-wip4.onrender.com`, out of the box.
 
 ```bash
 flutter pub get
-flutter run -d chrome --dart-define=API_BASE_URL=http://127.0.0.1:8000
+flutter run -d chrome
 ```
 
-- The `API_BASE_URL` default is already `http://127.0.0.1:8000`, so the define
-  can be omitted when the API is local.
-- Android emulator: `--dart-define=API_BASE_URL=http://10.0.2.2:8000`.
+- The base URL lives in `ProdAPIUrls` (`lib/core/network/prod_api_urls.dart`)
+  and is selected by `ApiConfig`.
+- To run against a local API instead, override it at build time:
+  `--dart-define=API_BASE_URL=http://127.0.0.1:8000` (Android emulator:
+  `http://10.0.2.2:8000`).
 - The web build needs the API to send CORS headers for the app origin. If the
   backend does not, run the Flutter build on Android/desktop or add
   `CORSMiddleware` to the FastAPI app.
@@ -44,12 +47,12 @@ flutter run -d chrome --dart-define=API_BASE_URL=http://127.0.0.1:8000
 
 ### Run on a real Android phone
 
-USB is the quickest path and needs no `--dart-define`, because `adb reverse`
-makes the phone's `127.0.0.1:8000` point at the PC:
+USB is the quickest path: `adb reverse` makes the phone's `127.0.0.1:8000` point
+at the PC, so run with the local base URL:
 
 ```bash
 adb reverse tcp:8000 tcp:8000
-flutter run -d <device-id>
+flutter run -d <device-id> --dart-define=API_BASE_URL=http://127.0.0.1:8000
 ```
 
 Over Wi-Fi, find the PC's IPv4 address, allow TCP 8000 through the firewall,
@@ -102,7 +105,8 @@ lib/
 
 ## Notes
 
-- **URLs** live only in `lib/core/network/api_endpoints.dart`; data sources never
+- **URLs** live in `lib/core/network/api_urls.dart` and its `ProdAPIUrls`
+  implementation; `ApiEndpoints` re-exposes them and data sources never
   hard-code a path.
 - **Auth** is real HTTP: register → login → `GET /auth/me`, with refresh and
   logout wired into the data layer. The token pair and profile are stored in
