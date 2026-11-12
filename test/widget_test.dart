@@ -10,6 +10,7 @@ import 'package:bill_scanner/features/auth/data/repositories/auth_repository_imp
 import 'package:bill_scanner/features/auth/data/session/auth_session_store.dart';
 import 'package:bill_scanner/features/auth/domain/entities/user.dart';
 import 'package:bill_scanner/features/auth/domain/repositories/auth_repository.dart';
+import 'package:bill_scanner/features/balance/data/repositories/balance_repository_impl.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/register_page.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/sign_in_page.dart';
 import 'package:bill_scanner/features/auth/presentation/pages/welcome_page.dart';
@@ -42,6 +43,12 @@ Widget buildApp({
       authRepository:
           authRepository ?? FakeAuthRepository(latency: Duration.zero),
       billRepository: bills,
+      // No sqflite plugin in a widget test, so the repository runs on its
+      // in-memory fallback: the card still renders and still subtracts.
+      balanceRepository: BalanceRepositoryImpl(
+        database: null,
+        ownerId: () => 'guest',
+      ),
       scanRepository: ScanRepositoryImpl(
         bills: bills,
         hasSession: () => false,
@@ -143,6 +150,110 @@ void main() {
     expect(inPage(HomePage, find.text('Recent bills')), findsOneWidget);
     expect(inPage(HomePage, find.text('Asha Tiffins')), findsOneWidget);
     expect(navTab('Home'), findsOneWidget);
+  });
+
+  testWidgets('the balance card masks the figure until the eye is tapped', (
+    WidgetTester tester,
+  ) async {
+    await pumpApp(tester);
+    await continueAsGuest(tester);
+
+    expect(inPage(HomePage, find.text('AVAILABLE BALANCE')), findsOneWidget);
+    expect(inPage(HomePage, find.text('• • • • • •')), findsOneWidget);
+    // Entry 25,000.00 minus the demo bill of 680.00.
+    expect(inPage(HomePage, find.text('₹24,320.00')), findsNothing);
+
+    final Finder eye = inPage(HomePage, find.byIcon(Icons.visibility_outlined));
+    await tester.ensureVisible(eye);
+    await tester.pumpAndSettle();
+    await tester.tap(eye);
+    await tester.pumpAndSettle();
+
+    expect(inPage(HomePage, find.text('₹24,320.00')), findsOneWidget);
+    expect(
+      inPage(HomePage, find.byIcon(Icons.visibility_off_outlined)),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a saved bill immediately lowers the balance', (
+    WidgetTester tester,
+  ) async {
+    await pumpApp(tester);
+    await continueAsGuest(tester);
+
+    final Finder eye = inPage(HomePage, find.byIcon(Icons.visibility_outlined));
+    await tester.ensureVisible(eye);
+    await tester.pumpAndSettle();
+    await tester.tap(eye);
+    await tester.pumpAndSettle();
+    expect(inPage(HomePage, find.text('₹24,320.00')), findsOneWidget);
+
+    await openSampleReview(tester);
+    await tapSave(tester);
+
+    // 25,000.00 − (680.00 demo + 680.00 just saved).
+    expect(inPage(HomePage, find.text('₹23,640.00')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('updating the entry recomputes the balance', (
+    WidgetTester tester,
+  ) async {
+    await pumpApp(tester);
+    await continueAsGuest(tester);
+
+    // Reveal first: the card keeps its mask across an update.
+    final Finder eye = inPage(HomePage, find.byIcon(Icons.visibility_outlined));
+    await tester.ensureVisible(eye);
+    await tester.pumpAndSettle();
+    await tester.tap(eye);
+    await tester.pumpAndSettle();
+    expect(inPage(HomePage, find.text('₹24,320.00')), findsOneWidget);
+
+    final Finder update = inPage(HomePage, find.text('Update'));
+    await tester.ensureVisible(update);
+    await tester.pumpAndSettle();
+    await tester.tap(update);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Update balance'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextFormField), '10000');
+    await tester.tap(find.text('Save balance'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Update balance'), findsNothing);
+    // 10,000.00 entered, demo bill of 680.00 subtracted.
+    expect(inPage(HomePage, find.text('₹9,320.00')), findsOneWidget);
+  });
+
+  testWidgets('the dashboard reads at three widths without overflowing', (
+    WidgetTester tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    for (final Size size in const <Size>[
+      Size(320, 568),
+      Size(390, 844),
+      Size(800, 1000),
+    ]) {
+      // Drop the previous tree first: pumpWidget keeps State alive while the
+      // widget type matches, so without this the second round would still be
+      // sitting on the shell the first round navigated to. The dashboard lays
+      // its children out eagerly, so anything that overflows at this width is
+      // reported even when it is below the fold.
+      await tester.pumpWidget(const SizedBox());
+      await pumpApp(tester, size: size);
+      await continueAsGuest(tester);
+
+      expect(
+        inPage(HomePage, find.text('AVAILABLE BALANCE')),
+        findsOneWidget,
+        reason: 'balance card at $size',
+      );
+      expect(tester.takeException(), isNull, reason: 'layout at $size');
+    }
   });
 
   testWidgets('a restored session opens the dashboard directly', (

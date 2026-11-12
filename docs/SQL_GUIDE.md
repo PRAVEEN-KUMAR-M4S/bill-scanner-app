@@ -195,6 +195,29 @@ Read them as "a sorted copy of these columns". The first one serves
 second finds queued rows without scanning every bill. The third makes the items
 join and its `ORDER BY` cheap.
 
+### 4.5 The `balances` table
+
+```sql
+CREATE TABLE IF NOT EXISTS balances (
+  owner_id TEXT PRIMARY KEY NOT NULL,
+  base_balance REAL NOT NULL,
+  updated_at TEXT NOT NULL
+)
+```
+
+One row per account: the figure behind the dashboard's "Available balance"
+card. Three things are worth noticing:
+
+- `owner_id` is the primary key, so an account can never hold two competing
+  balances — a second write has to *replace* its row (§6.6).
+- `base_balance` is `REAL`, money with paise, exactly like `bills.total`.
+- there is **no index**. A table with one row per account is looked up by its
+  primary key, which SQLite already keeps sorted; an index here would be a
+  second copy of data that never helps a query.
+
+`IF NOT EXISTS` makes the statement safe in two places: a fresh install and the
+version-2 migration step, which runs the same constant (§9).
+
 ---
 
 ## 5. Reading — `SELECT`
@@ -320,6 +343,21 @@ WHERE owner_id = ?
 `row['bill_count']` instead of a positional index. `BillRepositoryImpl` uses it
 to seed the demo bill exactly once for a guest.
 
+### 5.6 The saved balance
+
+`readBalance`
+
+```sql
+SELECT owner_id, base_balance, updated_at
+FROM balances
+WHERE owner_id = ?
+```
+
+A primary-key lookup, so there is no `ORDER BY` — one row can only come back in
+one order. An **empty result** is a real answer, not an error: it means nobody
+has set a balance for that account yet, which is how `BalanceRepositoryImpl`
+knows to offer `Balance.defaultBase`.
+
 ---
 
 ## 6. Writing — `INSERT`, `DELETE`
@@ -408,6 +446,32 @@ INSERT INTO bill_items (bill_id, position, name, amount, quantity) VALUES (?, ?,
 The local id is a placeholder. After the server accepts the bill, the real id
 replaces it; showing both would double-count the spend on the dashboard.
 
+### 6.6 Insert or replace the balance
+
+`writeBalance` — the only statement in the app written by hand as an `INSERT`:
+
+```sql
+INSERT OR REPLACE INTO balances (owner_id, base_balance, updated_at)
+VALUES (?, ?, ?)
+```
+
+Same conflict rule as §6.1, this time against `owner_id`: writing a second
+balance for one account rewrites its single row instead of adding a duplicate.
+
+Why not the modern upsert?
+
+```sql
+-- needs SQLite 3.24+ (2018); rejected by Android 9 and older
+INSERT INTO balances (owner_id, base_balance, updated_at) VALUES (?, ?, ?)
+ON CONFLICT (owner_id) DO UPDATE SET base_balance = excluded.base_balance;
+```
+
+The app's `minSdk` is Flutter's default, so Android 9 phones are supported, and
+they ship SQLite 3.22 — that statement would throw a syntax error at runtime
+while every test (which runs a modern SQLite) passed. `REPLACE` has worked for
+decades and costs the same here: there are no foreign keys pointing at
+`balances`, so deleting-then-inserting the one row is harmless.
+
 ---
 
 ## 7. Transactions
@@ -450,26 +514,38 @@ that actually uses it.
 
 ## 9. Migrations
 
-`AppDatabase.schemaVersion` is `1`. On first install, `onCreate` runs; on later
+`AppDatabase.schemaVersion` is `2`. On first install, `onCreate` runs; on later
 installs, `onUpgrade` runs only when the stored version is lower than the code's
 version.
 
 **Never edit `_create` after release.** Existing phones never run it again, so
 their schema would drift from new installs.
 
-To add a column (example: `payment_method`):
-
-1. bump `schemaVersion` to `2`;
-2. add a step in `_upgrade`, guarded by the old version;
-3. update the schema constant for new installs and the row mapper.
+The one migration shipped so far is the real one, in `_upgrade`:
 
 ```dart
 static Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
   if (oldVersion < 2) {
-    await db.execute(
-      "ALTER TABLE bills ADD COLUMN payment_method TEXT",
-    );
+    await db.execute(_createBalancesTable); // CREATE TABLE IF NOT EXISTS …
   }
+}
+```
+
+A phone on version 1 opens the new code, gains `balances`, and keeps every bill
+it already had. That is covered by a test, not by hope:
+`test/features/balance/data/balance_repository_impl_test.dart` writes a genuine
+version-1 file, reopens it through `AppDatabase`, and asserts the table exists
+and accepts a row.
+
+To add a column instead of a table (example: `payment_method`):
+
+1. bump `schemaVersion` to `3`;
+2. add a step in `_upgrade`, guarded by the old version;
+3. update the schema constant for new installs and the row mapper.
+
+```dart
+if (oldVersion < 3) {
+  await db.execute("ALTER TABLE bills ADD COLUMN payment_method TEXT");
 }
 ```
 
@@ -478,8 +554,8 @@ Rules:
 - `ALTER TABLE … ADD COLUMN` cannot add a `NOT NULL` column without a default.
 - Steps run in order, so a phone jumping from 1 to 3 runs both guards.
 - Backfills go in the same step (`UPDATE bills SET payment_method = 'cash'`).
-- Test the migration with `openDatabase(version: 1, …)`, close, then reopen with
-  the new version and assert the column exists.
+- Always test the migration the way the version-2 test does: build the old
+  version, close it, reopen with the new version, assert what changed.
 - A destructive change (rename/type change) needs the 12-step table rebuild:
   create `bills_new`, copy rows, drop `bills`, rename. SQLite has no
   `ALTER COLUMN`.

@@ -9,6 +9,7 @@ import 'features/auth/presentation/bloc/auth_state.dart';
 import 'features/auth/presentation/pages/register_page.dart';
 import 'features/auth/presentation/pages/sign_in_page.dart';
 import 'features/auth/presentation/pages/welcome_page.dart';
+import 'features/balance/presentation/bloc/balance_bloc.dart';
 import 'features/bills/domain/entities/bill.dart';
 import 'features/bills/domain/entities/bill_extraction.dart';
 import 'features/bills/domain/entities/bill_problem.dart';
@@ -32,6 +33,7 @@ class BillScannerApp extends StatefulWidget {
 class _BillScannerAppState extends State<BillScannerApp> {
   late final AuthBloc _authBloc = widget.dependencies.createAuthBloc();
   late final BillsBloc _billsBloc = widget.dependencies.createBillsBloc();
+  late final BalanceBloc _balanceBloc = widget.dependencies.createBalanceBloc();
 
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   final GlobalKey<ScaffoldMessengerState> _messengerKey =
@@ -41,6 +43,7 @@ class _BillScannerAppState extends State<BillScannerApp> {
   void dispose() {
     _authBloc.close();
     _billsBloc.close();
+    _balanceBloc.close();
     super.dispose();
   }
 
@@ -118,6 +121,7 @@ class _BillScannerAppState extends State<BillScannerApp> {
       providers: [
         BlocProvider<AuthBloc>.value(value: _authBloc),
         BlocProvider<BillsBloc>.value(value: _billsBloc),
+        BlocProvider<BalanceBloc>.value(value: _balanceBloc),
       ],
       child: BlocListener<AuthBloc, AuthState>(
         listener: _onAuthStateChanged,

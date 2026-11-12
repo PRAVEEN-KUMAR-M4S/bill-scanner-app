@@ -16,7 +16,7 @@ so the dashboard opens offline and saves wait in an upload queue.
 | **Design system** | Token-driven colours, spacing, radii, shadows and typography; 13 shared widgets |
 | **Responsive** | Verified at 320×568, 390×844 and 800×1000 |
 | **Camera** | In-app preview: permission → preview → shutter → API, with a loader; a simulated driver keeps tests off the plugin |
-| **Quality** | `flutter analyze` clean, 94 tests passing |
+| **Quality** | `flutter analyze` clean, 109 tests passing |
 
 ## Screens
 
@@ -61,7 +61,7 @@ See **[Running on a real Android phone](docs/ANDROID_DEVICE.md)** for the full
 checklist, first-run tests and troubleshooting.
 
 ```bash
-flutter test      # 94 tests, including real in-memory SQLite
+flutter test      # 109 tests, including real in-memory SQLite
 flutter analyze
 ```
 
@@ -93,6 +93,7 @@ lib/
     │                          # domain/ entities+repositories+usecases,
     │                          # presentation/ bloc+pages+widgets
     ├── auth/                  # welcome, sign in, register, persisted API session
+    ├── balance/               # available balance: entry minus every saved bill
     ├── bills/                 # bills: API data source, cache, queue, list + banner
     ├── home/                  # spending dashboard
     ├── scan/                  # camera preview + shutter, extraction, add bill
@@ -109,6 +110,10 @@ lib/
 - **Bills** are real HTTP: `GET /bills` feeds the dashboard and list,
   `POST /bills/confirm` saves a reviewed draft, and `POST /bills/extract` is the
   scanner behind the camera/gallery flow.
+- **Balance is local.** The dashboard's “Available balance” card shows a figure
+  you type in yourself (`Update`) minus every bill you have saved — no bank
+  sync. It is stored per account in the same SQLite database (`balances` table),
+  so it survives a restart and stays private to the sign-in that owns it.
 - **The camera is real.** Opening the scan screen asks for access, renders the
   live preview in the frame, and the shutter hands the bytes to
   `POST /bills/extract` behind a loader. A `CameraDriver` abstraction keeps the

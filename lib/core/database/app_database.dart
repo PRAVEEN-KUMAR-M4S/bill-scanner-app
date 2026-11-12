@@ -35,7 +35,10 @@ final class AppDatabase {
 
   /// Bump this whenever the constants below change the schema, and add a
   /// matching step in [_upgrade]. See `docs/SQL_GUIDE.md` §9.
-  static const int schemaVersion = 1;
+  ///
+  /// v2 added `balances`, the manually maintained account balance the
+  /// dashboard's "Available balance" card shows.
+  static const int schemaVersion = 2;
 
   /// Mirrors `BillSyncState.synced`; the storage name is what the CHECK
   /// constraint in the schema accepts.
@@ -110,6 +113,7 @@ final class AppDatabase {
     final Batch batch = database.batch();
     batch.execute(_createBillsTable);
     batch.execute(_createBillItemsTable);
+    batch.execute(_createBalancesTable);
     batch.execute(_indexBillsOwnerDate);
     batch.execute(_indexBillsOwnerSync);
     batch.execute(_indexBillItemsBill);
@@ -118,23 +122,20 @@ final class AppDatabase {
 
   /// Migrations for installs that already have a database.
   ///
-  /// Version 1 is the first release, so there is nothing to migrate yet. When
-  /// [schemaVersion] becomes 2, bump it and add the step here:
-  ///
-  /// ```dart
-  /// if (oldVersion < 2) {
-  ///   await database.execute('ALTER TABLE bills ADD COLUMN ...');
-  /// }
-  /// ```
-  ///
   /// The steps run in order, so a phone on version 1 that jumps to 3 runs both
-  /// the `< 2` and the `< 3` steps.
+  /// the `< 2` and the `< 3` steps. A fresh install never comes through here:
+  /// [_create] already builds the whole schema for it.
+  ///
+  /// Version 2 adds the balance table. `CREATE TABLE IF NOT EXISTS` keeps the
+  /// step safe to re-run.
   static Future<void> _upgrade(
     Database database,
     int oldVersion,
     int newVersion,
   ) async {
-    // Intentionally empty until the first schema change.
+    if (oldVersion < 2) {
+      await database.execute(_createBalancesTable);
+    }
   }
 
   Future<void> close() => _database.close();
@@ -172,6 +173,14 @@ final class AppDatabase {
       pendingOnly ? _selectPendingItemsForOwner : _selectItemsForOwner,
       <Object?>[ownerId, if (pendingOnly) _pending],
     );
+  }
+
+  /// The stored balance row for [ownerId].
+  ///
+  /// Empty means nobody has set a balance for that account yet, which is the
+  /// signal the balance repository uses to offer its first-run value.
+  Future<List<Map<String, Object?>>> readBalance(String ownerId) {
+    return _database.rawQuery(_selectBalanceForOwner, <Object?>[ownerId]);
   }
 
   /// True when [ownerId] already owns at least one row; used once per guest
@@ -212,6 +221,25 @@ final class AppDatabase {
         await _write(txn, ownerId, bill, syncStatus: _synced);
       }
     });
+  }
+
+  /// Inserts or replaces [ownerId]'s balance row.
+  ///
+  /// One account owns exactly one row, so the primary key is the conflict
+  /// target: the second save rewrites that row instead of adding a duplicate
+  /// (§6.6). `INSERT OR REPLACE` rather than `ON CONFLICT ... DO UPDATE` for
+  /// one reason — Android 9 and older ship SQLite 3.22, which rejects the
+  /// newer upsert syntax at runtime.
+  Future<void> writeBalance(
+    String ownerId, {
+    required double base,
+    required DateTime updatedAt,
+  }) {
+    return _database.rawInsert(_upsertBalanceForOwner, <Object?>[
+      ownerId,
+      base,
+      updatedAt.toIso8601String(),
+    ]);
   }
 
   /// Swaps a queued bill for the version the server returned, so its local id
@@ -315,6 +343,16 @@ ON bills (owner_id, sync_status)''';
 CREATE INDEX idx_bill_items_bill
 ON bill_items (bill_id, position)''';
 
+  /// One row per account: the balance the user entered by hand, before any
+  /// bill is subtracted. `owner_id` is the primary key, so an account can
+  /// never hold two competing balances.
+  static const String _createBalancesTable = '''
+CREATE TABLE IF NOT EXISTS balances (
+  owner_id TEXT PRIMARY KEY NOT NULL,
+  base_balance REAL NOT NULL,
+  updated_at TEXT NOT NULL
+)''';
+
   /// SQLite disables foreign keys by default for backwards compatibility.
   static const String _enableForeignKeys = 'PRAGMA foreign_keys = ON';
 
@@ -364,4 +402,13 @@ WHERE owner_id = ?''';
   static const String _deleteSyncedBillsForOwner = '''
 DELETE FROM bills
 WHERE owner_id = ? AND sync_status = ?''';
+
+  static const String _selectBalanceForOwner = '''
+SELECT owner_id, base_balance, updated_at
+FROM balances
+WHERE owner_id = ?''';
+
+  static const String _upsertBalanceForOwner = '''
+INSERT OR REPLACE INTO balances (owner_id, base_balance, updated_at)
+VALUES (?, ?, ?)''';
 }

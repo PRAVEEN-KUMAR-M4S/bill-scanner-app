@@ -19,7 +19,9 @@ debugging stories that make the project sound like work rather than a tutorial.
 > paper components, and layouts verified from 320-pixel phones up to tablets.
 > Bills are offline-first: SQLite caches the last list, and a save made without
 > a connection waits in an upload queue and syncs on the next successful load.
-> It has 94 tests — 19 widget paths and 75 unit tests (network, data, SQLite
+> The dashboard also carries a locally stored balance: a figure you enter once,
+> minus every bill you have saved, so each expense is reflected immediately.
+> It has 109 tests — 23 widget paths and 86 unit tests (network, data, SQLite
 > schema/queries, the offline queue and the scan bloc) — and the analyzer is
 > clean."
 
@@ -48,7 +50,7 @@ debugging stories that make the project sound like work rather than a tutorial.
    totals, and save. On success `ReviewSaved` triggers a bills reload, a snack
    bar and a pop to the shell.
 7. **Quality** — 13 shared design-system widgets, design tokens instead of
-   hardcoded values, responsive patterns, 94 tests (19 widget + 75 unit,
+   hardcoded values, responsive patterns, 109 tests (23 widget + 86 unit,
    including real SQLite) and zero analyzer issues.
 
 ---

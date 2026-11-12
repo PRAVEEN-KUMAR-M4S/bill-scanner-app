@@ -60,7 +60,8 @@ A user can:
 1. Enter as a guest, sign in with email/password, or register. Google/Apple
    buttons are visible but report that the backend does not offer them yet.
 2. Land on a dashboard that summarises the current month, charts the last seven
-   days and lists recent bills.
+   days, shows the running balance (entry minus every bill, masked by default)
+   and lists recent bills.
 3. Open the full bills list, search by shop/category/item and filter by
    category.
 4. Start a capture from the dashboard or the bills list.
@@ -85,6 +86,10 @@ they define (files with identical sizes are duplicates):
 | 6 | Add a bill | `Bill-Expenses (2).png` = `(3).png` | `/add-bill` | Post-login |
 | 7 | Bill camera | `Bill-Expenses (6).png` | `/add-bill/camera` | Post-login |
 | 8 | Review bill | `Bill-Expenses (4).png` = `(5).png` | `/add-bill/review` | Post-login |
+
+`Bill-Expenses (8).png` is the same Home dashboard with the **Available
+balance** card added, so it is screen 4 with that card — which is implemented:
+the card reads a manually maintained entry and subtracts every saved bill.
 
 **Not implemented, because no export shows them:** a bill-detail screen, a
 history/analytics screen beyond the bills list, and profile/settings screens.
@@ -215,6 +220,8 @@ lib/
 ├── core/                         # cross-feature code
 │   ├── di/
 │   │   └── injector.dart         # AppDependencies: the single composition root
+│   ├── database/
+│   │   └── app_database.dart     # the only file that speaks SQL (schema + queries)
 │   ├── navigation/
 │   │   ├── app_routes.dart       # route names shared across features
 │   │   └── app_shell.dart        # signed-in shell + bottom navigation
@@ -253,16 +260,26 @@ lib/
     │   │   ├── entities/         # User, AuthProvider
     │   │   ├── failures/         # AuthFailure
     │   │   ├── repositories/     # AuthRepository (contract)
-    │   │   └── usecases/         # SignIn, Register, ProviderSignIn, Guest, SignOut
+    │   │   └── usecases/         # Login, Register, SignInWithProvider, Guest, SignOut
     │   ├── data/
     │   │   ├── datasources/      # AuthRemoteDataSource (the five endpoints)
     │   │   ├── models/           # AuthTokens, UserModel
     │   │   ├── session/          # AuthSessionStore + SharedPreferences storage
-    │   │   └── repositories/     # AuthRepositoryImpl, FakeAuthRepository
+    │   │   └── repositories/     # AuthRepositoryImpl
     │   └── presentation/
     │       ├── bloc/             # AuthBloc + sealed events/states
     │       ├── pages/            # Welcome, SignIn, Register
     │       └── widgets/          # AuthPageScaffold, AuthFooterPrompt
+    ├── balance/
+    │   ├── domain/
+    │   │   ├── entities/         # Balance (the entry + available after bills)
+    │   │   ├── repositories/     # BalanceRepository (contract)
+    │   │   └── usecases/         # LoadBalance, UpdateBalance
+    │   ├── data/
+    │   │   └── repositories/     # BalanceRepositoryImpl (SQLite, one row per owner)
+    │   └── presentation/
+    │       ├── bloc/             # BalanceBloc + sealed events/states
+    │       └── widgets/          # AvailableBalanceCard + its update sheet
     ├── bills/
     │   ├── domain/
     │   │   ├── entities/         # Bill, BillItem, BillCategory, BillSummary,
@@ -273,26 +290,24 @@ lib/
     │   │   └── usecases/         # FetchBills, SaveBill
     │   ├── data/
     │   │   ├── datasources/      # BillRemoteDataSource (three endpoints)
-    │   │   ├── local/            # the offline cache: SQL catalogue, database,
-    │   │   │                     # row mapper, SQLite + memory stores
-    │   │   ├── models/           # BillMapper (JSON ⇄ domain)
+    │   │   ├── models/           # BillMapper (JSON ⇄ domain), BillRowMapper (row ⇄ domain)
     │   │   ├── sample_bill.dart  # the demo bill used by seed + previews
-    │   │   └── repositories/     # Api, Offline (cache + queue), Local (guest),
-    │   │                         # Session router, InMemory
+    │   │   └── repositories/     # BillRepositoryImpl — API, cache, queue and guest
+    │   │                         # store in one implementation, routed by session
     │   └── presentation/
     │       ├── bloc/             # BillsBloc + events/states
     │       ├── pages/            # BillsPage
     │       └── widgets/          # BillTile, SyncStatusBanner
     ├── home/
     │   └── presentation/
-    │       └── pages/            # HomePage (reads BillsBloc)
+    │       └── pages/            # HomePage (reads BillsBloc + BalanceBloc)
     ├── scan/
     │   ├── domain/
-    │   │   ├── entities/         # ScanSource (camera / gallery)
+    │   │   ├── entities/         # ScanSource (camera / gallery), CapturedPhoto
     │   │   ├── repositories/     # ScanRepository
-    │   │   └── usecases/         # CaptureBill
+    │   │   └── usecases/         # CaptureBill, ReadPhoto
     │   ├── data/
-    │   │   └── repositories/     # ScanRepositoryImpl, ScanRepositoryImpl
+    │   │   └── repositories/     # ScanRepositoryImpl (API for members, sample for guests)
     │   └── presentation/
     │       ├── bloc/             # ScanBloc + events/states
     │       ├── pages/            # AddBillPage, ScanPage
@@ -518,13 +533,16 @@ Key navigation decisions:
 | Bloc | Created in | Lifetime | Shared by |
 |---|---|---|---|
 | `AuthBloc` | `BillScannerApp` | whole app, closed in `dispose` | Welcome, SignIn, Register, auth listener, profile sheet |
-| `BillsBloc` | `BillScannerApp` | whole app | Home, Bills, review (reload after save) |
+| `BillsBloc` | `BillScannerApp` | whole app, closed in `dispose` | Home, Bills, review (reload after save) |
+| `BalanceBloc` | `BillScannerApp` | whole app, closed in `dispose` | Home's balance card |
 | `ScanBloc` | camera route builder | camera route | ScanPage |
 | `ReviewBloc` | review route builder | review route | ReviewPage |
 
 This is the "lift state only as far as needed" rule: the bills list and
 dashboard must agree, so their state lives above both; the scan session is
-meaningless after leaving the camera, so it dies with the route.
+meaningless after leaving the camera, so it dies with the route. The balance
+bloc sits at the top only because its card is on the dashboard and it writes to
+the same database the bills cache uses.
 
 ### 5.7 Error handling and validation
 
@@ -949,6 +967,13 @@ The page is a `BlocBuilder<BillsBloc, BillsState>` inside `PageScaffold`:
 - `_SpendingCard` built from `BillSummary.fromBills(...)`:
   "Spent this month", bill-count pill, big rupee total, divider, "A little more
   clarity" + seven-day strip;
+- the balance card (`AvailableBalanceCard` from the `balance` feature) between
+  the two: `BlocBuilder<BalanceBloc>` supplies the stored entry and this screen's
+  `BillsLoaded.bills` supplies the spend, so the card shows
+  `balance.available(bills)` and updates itself the moment `BillsBloc` emits —
+  no event, no second source of truth. The eye toggles the mask (local state)
+  and the pill opens a bottom sheet whose validated amount dispatches
+  `BalanceBaseUpdated`;
 - `ActionTile` for "Add a bill";
 - `SectionHeading` with a "See all" action that switches tab;
 - recent bills (first three) using `BillTile`.
@@ -1439,11 +1464,19 @@ The app is tested at two levels, with no live server:
 BillScannerApp(dependencies: AppDependencies(
   authRepository: FakeAuthRepository(latency: Duration.zero),
   billRepository: FakeBillRepository(latency: Duration.zero),
+  balanceRepository: BalanceRepositoryImpl(database: null, ownerId: () => 'guest'),
   scanRepository: ScanRepositoryImpl(
-    latency: const Duration(milliseconds: 120),
+    bills: bills,
+    hasSession: () => false,
+    guestLatency: const Duration(milliseconds: 120),
   ),
+  createCamera: FakeCameraDriver.new,
 ));
 ```
+
+The balance repository runs on its in-memory fallback because a widget test
+has no sqflite plugin: the card still renders and still subtracts; the SQL path
+is covered by the unit tests below.
 
 The 120 ms scan latency is deliberate: it lets the test observe the
 `ScanScanning` state (`pump(16ms)`) before `pumpAndSettle()` reaches review.
@@ -1452,7 +1485,7 @@ One widget test swaps the in-memory auth repository for an `AuthRepositoryImpl`
 backed by `MockClient`, so the real sign-in path is exercised through the UI:
 network → token store → `/auth/me` → navigation.
 
-### 10.2 The 19 widget tests
+### 10.2 The 23 widget tests
 
 | # | Test | Proves |
 |---|---|---|
@@ -1471,17 +1504,21 @@ network → token store → `/auth/me` → navigation.
 | 13 | review page fits the smallest viewport | review renders and scrolls at 320×568 |
 | 14 | sign in through the API reaches the dashboard | sign-in form → `AuthRepositoryImpl` → `/auth/login` → `/auth/me` → shell, with the bearer header asserted |
 | 15 | a refused camera explains itself and can be retried | blocked copy, no preview/shutter before access, retry asks again, no exceptions |
+| 16 | the balance card masks the figure until the eye is tapped | masked by default; revealing shows entry − bills (`₹24,320.00`) |
+| 17 | a saved bill immediately lowers the balance | save 680.00 → dashboard shows `₹23,640.00` with no event to the balance bloc |
+| 18 | updating the entry recomputes the balance | sheet → validation → repository → card shows the corrected figure |
+| 19 | the dashboard reads at three widths without overflowing | the balance card renders with no layout exception at 320/390/800 |
 
 `test/offline_flow_test.dart` adds four app-level tests for the cache:
 
 | # | Test | Proves |
 |---|---|---|
-| 16 | a cached list explains it is offline on both tabs | `BillsSource.cache` → banner on Home and Bills |
-| 17 | a queued bill is badged and counted | pending row → "Pending sync" + "1 bill waiting to sync" |
-| 18 | saving while offline queues the bill and says so | review → queue → "Saved on this phone…" → badged row on Home |
-| 19 | banner and pending badge fit small and wide screens | no overflow at 320×568, 390×844, 800×1000 |
+| 20 | a cached list explains it is offline on both tabs | `BillsSource.cache` → banner on Home and Bills |
+| 21 | a queued bill is badged and counted | pending row → "Pending sync" + "1 bill waiting to sync" |
+| 22 | saving while offline queues the bill and says so | review → queue → "Saved on this phone…" → badged row on Home |
+| 23 | banner and pending badge fit small and wide screens | no overflow at 320×568, 390×844, 800×1000 |
 
-### 10.3 The 75 unit tests
+### 10.3 The 86 unit tests
 
 `test/core/network/api_service_test.dart` (12 tests):
 
@@ -1589,6 +1626,19 @@ camera state machine against a fake `CameraDriver` and a fake repository:
 
 `test/core/network/api_endpoints_test.dart` (2 tests) locks the URL list:
 every path absolute, unique, and the three bill routes under `/bills`.
+
+`test/features/balance/domain/balance_test.dart` (5 tests) covers the card's
+arithmetic:
+
+| Proves |
+|---|
+| entry with no bills stays the entry; every bill subtracts; a pending bill counts too; spending can push it negative |
+
+`test/features/balance/data/balance_repository_impl_test.dart` (6 tests) runs
+the real SQL on in-memory SQLite — first-run value, save → read round-trip,
+`INSERT OR REPLACE` not duplicating rows, one account never seeing another's
+figure, the no-database fallback, and the **v1 → v2 migration** against a
+genuine version-1 file.
 
 ### 10.4 Test helpers worth explaining
 
@@ -1767,11 +1817,23 @@ bill" and list content) or use a demo clock.
 | `presentation/widgets/bill_tile.dart` | shared bill row (+ pending badge) |
 | `presentation/widgets/sync_status_banner.dart` | offline/pending banner shared by Home and Bills |
 
+### Balance
+
+| File | Purpose |
+|---|---|
+| `domain/entities/balance.dart` | the entry, plus `available(bills)` — entry minus every bill |
+| `domain/repositories/balance_repository.dart` | load / save contract |
+| `domain/usecases/load_balance.dart` | read the stored entry |
+| `domain/usecases/update_balance.dart` | write a new entry |
+| `data/repositories/balance_repository_impl.dart` | one `balances` row per owner in SQLite; in-memory value where there is no database |
+| `presentation/bloc/balance_{bloc,event,state}.dart` | loading / loaded / failure, `Started` + `BaseUpdated` |
+| `presentation/widgets/available_balance_card.dart` | masked card, eye toggle and the update sheet |
+
 ### Home
 
 | File | Purpose |
 |---|---|
-| `presentation/pages/home_page.dart` | dashboard, summary card, chart, profile sheet |
+| `presentation/pages/home_page.dart` | dashboard, summary card, balance card, chart, profile sheet |
 
 ### Scan
 
@@ -1803,19 +1865,19 @@ bill" and list content) or use a demo clock.
 
 | File | Purpose |
 |---|---|
-| `test/widget_test.dart` | 15 widget tests + helpers, including API sign-in and session restore |
+| `test/widget_test.dart` | 19 widget tests + helpers, including API sign-in, session restore and the balance card |
 | `test/offline_flow_test.dart` | 4 widget tests for the offline banner, pending badge and offline save |
-| `test/core/database/app_database_test.dart` | 9 tests of the real schema/queries on in-memory SQLite |
-| `test/features/bills/data/bill_repository_impl_test.dart` | 6 tests for cache, queue and flush policy |
-| `test/features/bills/data/bill_repository_impl_test.dart` | 2 tests for the guest store |
+| `test/core/database/app_database_test.dart` | 10 tests of the real schema/queries on in-memory SQLite |
+| `test/features/bills/data/bill_repository_impl_test.dart` | 12 tests for cache, queue, flush policy and guest/member routing |
+| `test/features/balance/domain/balance_test.dart` | 5 tests for the balance arithmetic |
+| `test/features/balance/data/balance_repository_impl_test.dart` | 6 tests for the SQL, per-owner ownership and the v1 → v2 migration |
 | `test/features/scan/presentation/scan_bloc_test.dart` | 6 tests for the camera state machine |
 | `test/core/network/api_endpoints_test.dart` | URL list stays absolute and unique |
 | `test/core/network/api_service_test.dart` | 12 tests for verbs, multipart and errors |
 | `test/features/auth/data/auth_repository_impl_test.dart` | 13 tests for auth, tokens, logout and refresh |
 | `test/features/auth/data/auth_session_store_test.dart` | 6 tests for SharedPreferences/in-memory session storage |
-| `test/features/bills/data/bill_remote_datasource_test.dart` | 6 tests for list/extract/confirm and failures |
-| `test/features/bills/data/bill_repository_impl_test.dart` | 3 tests for guest/member routing |
-| `test/features/scan/data/scan_repository_impl_test.dart` | 6 tests for the picker/shutter → extract hand-off and session routing |
+| `test/features/bills/data/bill_remote_datasource_test.dart` | 7 tests for list/extract/confirm and failures |
+| `test/features/scan/data/scan_repository_impl_test.dart` | 7 tests for the picker/shutter → extract hand-off and session routing |
 | `docs/PROJECT_GUIDE.md` | this document |
 | `docs/SQL_GUIDE.md` | every query explained, plus practice tasks and solutions |
 | `docs/INTERVIEW_NOTES.md` | pitch, Q&A, snippets, debugging stories |

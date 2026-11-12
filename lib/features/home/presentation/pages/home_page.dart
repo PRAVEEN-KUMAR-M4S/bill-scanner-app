@@ -17,6 +17,11 @@ import '../../../auth/domain/entities/user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/bloc/auth_event.dart';
 import '../../../auth/presentation/bloc/auth_state.dart';
+import '../../../balance/domain/entities/balance.dart';
+import '../../../balance/presentation/bloc/balance_bloc.dart';
+import '../../../balance/presentation/bloc/balance_event.dart';
+import '../../../balance/presentation/bloc/balance_state.dart';
+import '../../../balance/presentation/widgets/available_balance_card.dart';
 import '../../../bills/domain/entities/bill.dart';
 import '../../../bills/domain/entities/bill_summary.dart';
 import '../../../bills/presentation/bloc/bills_bloc.dart';
@@ -95,6 +100,8 @@ class HomePage extends StatelessWidget {
       ],
       _SpendingCard(summary: summary),
       const SizedBox(height: AppSpacing.md + 2),
+      _balance(context, state),
+      const SizedBox(height: AppSpacing.md + 2),
       ActionTile(
         icon: Icons.photo_camera_outlined,
         title: 'Add a bill',
@@ -119,6 +126,42 @@ class HomePage extends StatelessWidget {
           if (i != recent.length - 1) const SizedBox(height: AppSpacing.sm + 2),
         ],
     ];
+  }
+
+  /// The balance card sits between the spend card and "Add a bill": it needs
+  /// this screen's bills (to subtract them) and its own bloc (for the entry
+  /// the user stored), so it is built here rather than inside `_loaded`'s flat
+  /// list.
+  Widget _balance(BuildContext context, BillsLoaded state) {
+    return BlocBuilder<BalanceBloc, BalanceState>(
+      builder: (BuildContext context, BalanceState balanceState) {
+        return switch (balanceState) {
+          BalanceLoaded(:final Balance balance) => AvailableBalanceCard(
+            balance: balance,
+            bills: state.bills,
+            onUpdate: (double base) =>
+                context.read<BalanceBloc>().add(BalanceBaseUpdated(base)),
+          ),
+          BalanceFailure(:final String message) => _DashboardFailure(
+            message: message,
+            onRetry: () =>
+                context.read<BalanceBloc>().add(const BalanceStarted()),
+          ),
+          BalanceLoading() => const PaperCard(
+            padding: EdgeInsets.all(AppSpacing.lg),
+            child: SizedBox(
+              height: 64,
+              child: Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.ink,
+                ),
+              ),
+            ),
+          ),
+        };
+      },
+    );
   }
 
   Future<void> _showProfile(BuildContext context) async {

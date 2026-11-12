@@ -12,6 +12,11 @@ import '../../features/auth/domain/usecases/register.dart';
 import '../../features/auth/domain/usecases/sign_in_with_provider.dart';
 import '../../features/auth/domain/usecases/sign_out.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
+import '../../features/balance/data/repositories/balance_repository_impl.dart';
+import '../../features/balance/domain/repositories/balance_repository.dart';
+import '../../features/balance/domain/usecases/load_balance.dart';
+import '../../features/balance/domain/usecases/update_balance.dart';
+import '../../features/balance/presentation/bloc/balance_bloc.dart';
 import '../../features/bills/data/datasources/bill_remote_datasource.dart';
 import '../../features/bills/data/repositories/bill_repository_impl.dart';
 import '../../features/bills/data/sample_bill.dart';
@@ -48,6 +53,7 @@ final class AppDependencies {
   factory AppDependencies({
     required AuthRepository authRepository,
     required BillRepository billRepository,
+    required BalanceRepository balanceRepository,
     required ScanRepository scanRepository,
     required CameraDriver Function() createCamera,
     User? restoredUser,
@@ -55,6 +61,7 @@ final class AppDependencies {
     return AppDependencies._(
       authRepository: authRepository,
       billRepository: billRepository,
+      balanceRepository: balanceRepository,
       scanRepository: scanRepository,
       createCamera: createCamera,
       restoredUser: restoredUser,
@@ -64,11 +71,13 @@ final class AppDependencies {
   AppDependencies._({
     required AuthRepository authRepository,
     required BillRepository billRepository,
+    required BalanceRepository balanceRepository,
     required ScanRepository scanRepository,
     required CameraDriver Function() createCamera,
     User? restoredUser,
   }) : _authRepository = authRepository,
        _billRepository = billRepository,
+       _balanceRepository = balanceRepository,
        _scanRepository = scanRepository,
        _createCamera = createCamera,
        _restoredUser = restoredUser;
@@ -89,21 +98,28 @@ final class AppDependencies {
     );
     final User? restoredUser = await auth.restoreSession();
 
-    // One database backs the signed-in cache and the guest's device-only
-    // bills, partitioned by owner id.
+    // One database backs the signed-in cache, the guest's device-only bills
+    // and the balance card. Both repositories ask who is signed in per call,
+    // so the guest's rows and the account's rows stay apart.
     final AppDatabase? database = await AppDatabase.open();
+    String ownerId() =>
+        session.hasSession ? (session.user?.id ?? 'account') : 'guest';
     final BillRepositoryImpl bills = BillRepositoryImpl(
       remote: BillRemoteDataSource(api),
       database: database,
-      ownerId: () =>
-          session.hasSession ? (session.user?.id ?? 'account') : 'guest',
+      ownerId: ownerId,
       hasSession: () => session.hasSession,
       seed: buildSampleBill(DateTime.now()),
+    );
+    final BalanceRepositoryImpl balances = BalanceRepositoryImpl(
+      database: database,
+      ownerId: ownerId,
     );
 
     return AppDependencies._(
       authRepository: auth,
       billRepository: bills,
+      balanceRepository: balances,
       scanRepository: ScanRepositoryImpl(
         bills: bills,
         hasSession: () => session.hasSession,
@@ -115,6 +131,7 @@ final class AppDependencies {
 
   final AuthRepository _authRepository;
   final BillRepository _billRepository;
+  final BalanceRepository _balanceRepository;
   final ScanRepository _scanRepository;
   final CameraDriver Function() _createCamera;
   final User? _restoredUser;
@@ -139,6 +156,15 @@ final class AppDependencies {
 
   BillsBloc createBillsBloc() {
     return BillsBloc(fetchBills: FetchBills(_billRepository));
+  }
+
+  /// One bloc for the dashboard's balance card: it reads the stored entry
+  /// when the shell opens and writes it when the sheet is saved.
+  BalanceBloc createBalanceBloc() {
+    return BalanceBloc(
+      loadBalance: LoadBalance(_balanceRepository),
+      updateBalance: UpdateBalance(_balanceRepository),
+    );
   }
 
   /// A fresh camera per screen: opening the camera screen asks for access,

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../features/balance/presentation/bloc/balance_bloc.dart';
+import '../../features/balance/presentation/bloc/balance_event.dart';
 import '../../features/bills/presentation/bloc/bills_bloc.dart';
 import '../../features/bills/presentation/bloc/bills_event.dart';
 import '../../features/bills/presentation/pages/bills_page.dart';
@@ -28,6 +30,8 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     context.read<BillsBloc>().add(const BillsStarted());
+    // The balance card reads its stored entry once the dashboard is up.
+    context.read<BalanceBloc>().add(const BalanceStarted());
   }
 
   void _select(int index) {

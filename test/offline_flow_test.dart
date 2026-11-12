@@ -4,6 +4,7 @@ import 'package:bill_scanner/core/di/injector.dart';
 import 'package:bill_scanner/core/navigation/app_shell.dart';
 import 'package:bill_scanner/core/network/api_service.dart';
 import 'package:bill_scanner/features/auth/domain/entities/user.dart';
+import 'package:bill_scanner/features/balance/data/repositories/balance_repository_impl.dart';
 import 'package:bill_scanner/features/bills/data/datasources/bill_remote_datasource.dart';
 import 'package:bill_scanner/features/bills/data/models/bill_row_mapper.dart';
 import 'package:bill_scanner/features/bills/data/repositories/bill_repository_impl.dart';
@@ -46,11 +47,15 @@ Bill _bill({
   );
 }
 
-Widget _app(BillRepositoryImpl bills) {
+Widget _app(BillRepositoryImpl bills, AppDatabase database) {
   return BillScannerApp(
     dependencies: AppDependencies(
       authRepository: FakeAuthRepository(latency: Duration.zero),
       billRepository: bills,
+      balanceRepository: BalanceRepositoryImpl(
+        database: database,
+        ownerId: () => _owner,
+      ),
       scanRepository: ScanRepositoryImpl(
         bills: bills,
         hasSession: () => true,
@@ -101,7 +106,7 @@ Future<void> _pump(
   Size size = const Size(390, 844),
 }) async {
   await tester.binding.setSurfaceSize(size);
-  await tester.pumpWidget(_app(_offlineRepository(database)));
+  await tester.pumpWidget(_app(_offlineRepository(database), database));
   await tester.pumpAndSettle();
 }
 
