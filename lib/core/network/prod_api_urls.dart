@@ -15,26 +15,26 @@ class ProdAPIUrls implements ApiUrls {
   Uri get baseUri => Uri.parse(baseUrl);
 
   @override
-  String get authRegister => '$defaultBaseUrl/auth/register';
+  String get authRegister => '/auth/register';
 
   @override
-  String get authLogin => '$defaultBaseUrl/auth/login';
+  String get authLogin => '/auth/login';
 
   @override
-  String get authRefresh => '$defaultBaseUrl/auth/refresh';
+  String get authRefresh => '/auth/refresh';
 
   @override
-  String get authLogout => '$defaultBaseUrl/auth/logout';
+  String get authLogout => '/auth/logout';
 
   @override
-  String get authMe => '$defaultBaseUrl/auth/me';
+  String get authMe => '/auth/me';
 
   @override
-  String get bills => '$defaultBaseUrl/bills';
+  String get bills => '/bills';
 
   @override
-  String get billsExtract => '$defaultBaseUrl/bills/extract';
+  String get billsExtract => '/bills/extract';
 
   @override
-  String get billsConfirm => '$defaultBaseUrl/bills/confirm';
+  String get billsConfirm => '/bills/confirm';
 }

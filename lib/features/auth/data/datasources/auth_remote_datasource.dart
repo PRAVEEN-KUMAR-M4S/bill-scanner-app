@@ -21,13 +21,13 @@ class AuthRemoteDataSource {
     required String password,
   }) async {
     try {
-      print("jhjhfjhdj${ApiEndpoints.authLogin}");
       final Object? json = await _api.post(
         ApiEndpoints.authLogin,
         body: <String, Object?>{'email': email, 'password': password},
       );
       return AuthTokens.fromJson(_asMap(json));
     } on ApiException catch (exception) {
+      print("error ${exception}");
       throw _failureFor(exception, submittingCredentials: true);
     }
   }
