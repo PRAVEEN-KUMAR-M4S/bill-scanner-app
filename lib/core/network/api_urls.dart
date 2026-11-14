@@ -20,4 +20,8 @@ abstract class ApiUrls {
   String get billsExtract;
 
   String get billsConfirm;
+
+  String get account;
+
+  String get accountBalance;
 }

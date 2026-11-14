@@ -15,9 +15,14 @@ import '../../domain/entities/balance.dart';
 /// The dashboard's "Available balance" card.
 ///
 /// What it shows is the arithmetic, not a second source of truth:
-/// `balance.available(bills)` — the entry the user typed minus every bill in
-/// the list. When `BillsBloc` emits after a save, this card rebuilds and the
-/// figure has already moved; no event is needed.
+/// `balance.available(bills)` — the figure the user set minus the spending.
+/// A signed-in account takes that spending from the API, which counts every
+/// stored bill; a guest subtracts the bills on this phone. Either way, when
+/// `BillsBloc` emits after a save the card rebuilds and the figure has already
+/// moved; no event is needed.
+///
+/// The "Update" sheet writes the balance with `PUT /account/balance`, which
+/// replaces the figure — so the field is prefilled with the current one.
 ///
 /// The eye button is local UI state (masking is a glance-level concern, not
 /// application state), so it lives here rather than in the bloc.

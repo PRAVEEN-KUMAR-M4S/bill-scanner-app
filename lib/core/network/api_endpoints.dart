@@ -19,4 +19,8 @@ abstract final class ApiEndpoints {
   static String get billsExtract => _urls.billsExtract;
 
   static String get billsConfirm => _urls.billsConfirm;
+
+  static String get account => _urls.account;
+
+  static String get accountBalance => _urls.accountBalance;
 }

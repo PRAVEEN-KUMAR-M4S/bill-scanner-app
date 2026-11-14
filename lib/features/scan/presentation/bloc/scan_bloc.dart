@@ -31,14 +31,16 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
     on<ScanCaptureRequested>(_onCaptureRequested);
     on<ScanFlashToggled>(_onFlashToggled);
     on<ScanFlipRequested>(_onFlipRequested);
-    on<ScanResetRequested>(
-      (_, Emitter<ScanState> emit) => emit(_restingState()),
-    );
+    on<ScanResetRequested>(_onResetRequested);
   }
 
   final CaptureBill _captureBill;
   final ReadPhoto _readPhoto;
   final CameraDriver _camera;
+
+  /// True once this screen has asked for the camera, so a reset knows whether
+  /// to bring the preview back after the shutter closed it.
+  bool _usedCamera = false;
 
   /// The camera this screen drives. The page needs it to draw the preview;
   /// opening and closing stay with the bloc.
@@ -55,6 +57,30 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
     Emitter<ScanState> emit,
   ) async {
     if (state is ScanStarting || state is ScanLive) return;
+
+    _usedCamera = true;
+    emit(const ScanStarting());
+    final CameraStatus status;
+    try {
+      status = await _camera.open();
+    } on Exception {
+      if (!isClosed) emit(const ScanBlocked(unavailableMessage));
+      return;
+    }
+    if (isClosed) return;
+    emit(_stateFor(status));
+  }
+
+  /// Back to the resting state, reopening the preview when the shutter closed
+  /// it (after a capture, or on the way back from the review screen).
+  Future<void> _onResetRequested(
+    ScanResetRequested event,
+    Emitter<ScanState> emit,
+  ) async {
+    if (!_usedCamera || _camera.status == CameraStatus.live) {
+      emit(_restingState());
+      return;
+    }
 
     emit(const ScanStarting());
     final CameraStatus status;
@@ -87,6 +113,17 @@ class ScanBloc extends Bloc<ScanEvent, ScanState> {
       emit(const ScanFailure('Could not take that photo. Try again.'));
       return;
     }
+
+    // The picture is in hand, so the lens has nothing left to do: close it and
+    // show the captured frame in its place while the scanner reads it.
+    try {
+      await _camera.close();
+    } on Exception {
+      // Releasing is best effort; the photo is already safe in memory.
+    }
+    if (isClosed) return;
+
+    emit(ScanScanning(ScanSource.camera, photo: photo));
     await _readAndEmit(photo, emit);
   }
 

@@ -27,7 +27,6 @@ class AuthRemoteDataSource {
       );
       return AuthTokens.fromJson(_asMap(json));
     } on ApiException catch (exception) {
-      print("error ${exception}");
       throw _failureFor(exception, submittingCredentials: true);
     }
   }

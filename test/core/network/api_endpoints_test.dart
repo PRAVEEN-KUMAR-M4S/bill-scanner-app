@@ -12,6 +12,8 @@ void main() {
       ApiEndpoints.bills,
       ApiEndpoints.billsExtract,
       ApiEndpoints.billsConfirm,
+      ApiEndpoints.account,
+      ApiEndpoints.accountBalance,
     ];
 
     expect(endpoints.toSet(), hasLength(endpoints.length));
@@ -25,5 +27,10 @@ void main() {
     expect(ApiEndpoints.bills, '/bills');
     expect(ApiEndpoints.billsExtract, '/bills/extract');
     expect(ApiEndpoints.billsConfirm, '/bills/confirm');
+  });
+
+  test('the account endpoints share the /account resource', () {
+    expect(ApiEndpoints.account, '/account');
+    expect(ApiEndpoints.accountBalance, '/account/balance');
   });
 }

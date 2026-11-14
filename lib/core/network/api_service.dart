@@ -9,6 +9,10 @@ import 'api_exception.dart';
 /// Reads the current access token, or `null` when nobody is signed in.
 typedef AccessTokenReader = Future<String?> Function();
 
+/// Called when a 401 is received on an authenticated request.
+/// Should return `true` if the token was refreshed successfully.
+typedef TokenRefresher = Future<bool> Function();
+
 /// One binary file sent as `multipart/form-data`.
 class ApiUploadFile {
   const ApiUploadFile({
@@ -45,6 +49,8 @@ class ApiService {
     http.Client? client,
     AccessTokenReader? accessToken,
     this.timeout = const Duration(seconds: 30),
+    this.uploadTimeout = const Duration(seconds: 120),
+    this.refreshToken,
   }) : _client = client ?? http.Client(),
        _accessToken = accessToken;
 
@@ -54,8 +60,16 @@ class ApiService {
   /// How long a request may take before [TimeoutApiException] is thrown.
   final Duration timeout;
 
+  /// How long a photo upload may take. The scanner reads the image with an AI
+  /// model, which is slower than a plain JSON call - and in a browser the whole
+  /// file is uploaded before the server can answer, so 30 s is easily too
+  /// short on a phone photo.
+  final Duration uploadTimeout;
+
   final http.Client _client;
   final AccessTokenReader? _accessToken;
+  final TokenRefresher? refreshToken;
+  bool _retryAllowed = true;
 
   /// GET [path] and decode the JSON response.
   Future<Object?> get(
@@ -112,7 +126,9 @@ class ApiService {
   /// POST a `multipart/form-data` body and decode the JSON response.
   ///
   /// Used for photo uploads, where the body is a file plus optional text
-  /// fields. The same timeout and error mapping as the JSON verbs apply.
+  /// fields. It waits [uploadTimeout] rather than [timeout], because a scan
+  /// upload is both bigger and slower than a JSON call; the error mapping is
+  /// the same as the JSON verbs.
   Future<Object?> postMultipart(
     String path, {
     required ApiUploadFile file,
@@ -143,8 +159,10 @@ class ApiService {
 
       final http.StreamedResponse streamed = await _client
           .send(request)
-          .timeout(timeout);
-      response = await http.Response.fromStream(streamed);
+          .timeout(uploadTimeout);
+      response = await http.Response.fromStream(streamed).timeout(
+        uploadTimeout,
+      );
     } on TimeoutException {
       throw const TimeoutApiException();
     } on http.ClientException {
@@ -206,6 +224,36 @@ class ApiService {
       throw const TimeoutApiException();
     } on http.ClientException {
       throw const NetworkApiException();
+    }
+
+    // Auto-refresh on 401 for authenticated requests
+    if (response.statusCode == 401 &&
+        authenticated &&
+        _retryAllowed &&
+        refreshToken != null) {
+      _retryAllowed = false;
+      try {
+        final bool refreshed = await refreshToken!.call();
+        if (refreshed) {
+          _retryAllowed = true;
+          final Map<String, String> newHeaders = await _headers(
+            headers: headers,
+            authenticated: true,
+            hasBody: body != null,
+          );
+          return _send(
+            method,
+            path,
+            body: body,
+            query: query,
+            headers: newHeaders,
+            authenticated: true,
+          );
+        }
+      } catch (_) {
+        // Refresh failed, let the original 401 propagate
+      }
+      _retryAllowed = true;
     }
 
     return _decode(response);

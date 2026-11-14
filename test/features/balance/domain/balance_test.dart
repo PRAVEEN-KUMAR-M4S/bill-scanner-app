@@ -50,6 +50,14 @@ void main() {
       const Balance balance = Balance(base: 100);
       expect(balance.available(<Bill>[_bill(250)]), -150);
     });
+
+    test('uses the spending the API counted when it reports one', () {
+      const Balance balance = Balance(base: 5000, spent: 624.14);
+
+      // The local list is ignored: the server's total is the source of truth,
+      // so a bill from another device is already accounted for.
+      expect(balance.available(<Bill>[_bill(1000)]), closeTo(4375.86, 0.001));
+    });
   });
 
   group('Balance copyWith', () {

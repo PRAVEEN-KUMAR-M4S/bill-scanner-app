@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 
 import '../../../bills/domain/entities/bill_extraction.dart';
+import '../../domain/entities/captured_photo.dart';
 import '../../domain/entities/scan_source.dart';
 
 /// States of the capture screen.
@@ -53,14 +54,19 @@ final class ScanBlocked extends ScanState {
 /// The photo is on its way through the scanner: the loader state.
 ///
 /// [source] says which path is running - the shutter or the library picker -
-/// so the copy under the loader can differ.
+/// so the copy under the loader can differ. [photo] is the frame the camera
+/// just took: the camera is closed at that point, so the page shows this photo
+/// in the frame instead of a live preview.
 final class ScanScanning extends ScanState {
-  const ScanScanning(this.source);
+  const ScanScanning(this.source, {this.photo});
 
   final ScanSource source;
 
+  /// The captured photo held in the frame while it is being read.
+  final CapturedPhoto? photo;
+
   @override
-  List<Object?> get props => <Object?>[source];
+  List<Object?> get props => <Object?>[source, photo];
 }
 
 /// The scanner produced a draft and the fields its checks flagged.

@@ -37,4 +37,10 @@ class ProdAPIUrls implements ApiUrls {
 
   @override
   String get billsConfirm => '/bills/confirm';
+
+  @override
+  String get account => '/account';
+
+  @override
+  String get accountBalance => '/account/balance';
 }

@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../features/auth/data/datasources/auth_remote_datasource.dart';
+import '../../features/auth/data/models/auth_tokens.dart';
 import '../../features/auth/data/repositories/auth_repository_impl.dart';
 import '../../features/auth/data/session/auth_session_storage.dart';
 import '../../features/auth/data/session/auth_session_store.dart';
@@ -12,6 +13,7 @@ import '../../features/auth/domain/usecases/register.dart';
 import '../../features/auth/domain/usecases/sign_in_with_provider.dart';
 import '../../features/auth/domain/usecases/sign_out.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
+import '../../features/balance/data/datasources/account_remote_datasource.dart';
 import '../../features/balance/data/repositories/balance_repository_impl.dart';
 import '../../features/balance/domain/repositories/balance_repository.dart';
 import '../../features/balance/domain/usecases/load_balance.dart';
@@ -114,6 +116,8 @@ final class AppDependencies {
     final BalanceRepositoryImpl balances = BalanceRepositoryImpl(
       database: database,
       ownerId: ownerId,
+      remote: AccountRemoteDataSource(api),
+      hasSession: () => session.hasSession,
     );
 
     return AppDependencies._(
@@ -192,6 +196,30 @@ final class AppDependencies {
     return ApiService(
       baseUrl: ApiConfig.baseUrl,
       accessToken: () async => session.accessToken,
+      refreshToken: () async => _tryRefresh(session),
     );
+  }
+
+  /// Tries to refresh the session after a 401. Returns true if successful.
+  static Future<bool> _tryRefresh(AuthSessionStore session) async {
+    // Need to recreate the repository to call refresh
+    // This is a simple approach - in production you'd inject the repository
+    final String? refreshToken = session.refreshToken;
+    if (refreshToken == null || refreshToken.isEmpty) return false;
+    
+    try {
+      final AuthRemoteDataSource remote = AuthRemoteDataSource(
+        ApiService(
+          baseUrl: ApiConfig.baseUrl,
+          accessToken: null, // Don't send auth header for refresh
+        ),
+      );
+      final AuthTokens tokens = await remote.refresh(refreshToken);
+      await session.save(tokens);
+      return true;
+    } catch (_) {
+      await session.clear();
+      return false;
+    }
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -9,6 +11,7 @@ import '../../../../core/widgets/paper_icon_button.dart';
 import '../../../../core/widgets/section_label.dart';
 import '../../../bills/domain/entities/bill.dart';
 import '../../../review/presentation/pages/review_page.dart';
+import '../../domain/entities/captured_photo.dart';
 import '../../domain/entities/scan_source.dart';
 import '../bloc/scan_bloc.dart';
 import '../bloc/scan_event.dart';
@@ -121,9 +124,24 @@ class _CaptureArea extends StatelessWidget {
     final ScanState state = context.watch<ScanBloc>().state;
     final CameraDriver camera = bloc.camera;
 
-    // The preview follows the driver, so it stays on - dimmed under the
-    // loader - while the photo is being read.
-    final Widget? preview = camera.status == CameraStatus.live
+    // Once the shutter has fired the camera is closed, so the frame shows the
+    // captured photo instead of a live preview while the scanner reads it.
+    final CapturedPhoto? captured = state is ScanScanning
+        ? state.photo
+        : null;
+    final Widget? preview = captured != null
+        ? Image.memory(
+            Uint8List.fromList(captured.bytes),
+            fit: BoxFit.cover,
+            gaplessPlayback: true,
+            // A frame the decoder cannot read leaves the frame empty rather
+            // than throwing inside the camera screen; the scan itself already
+            // has the bytes and carries on.
+            errorBuilder:
+                (BuildContext context, Object error, StackTrace? stack) =>
+                    const SizedBox.expand(),
+          )
+        : camera.status == CameraStatus.live
         ? camera.buildPreview(context)
         : null;
 
@@ -152,13 +170,16 @@ class _CaptureArea extends StatelessWidget {
 }
 
 /// The loader shown while the photo travels through the scanner.
+///
+/// Translucent, so the bill that was just captured stays visible in the frame
+/// underneath it.
 class _ReadingOverlay extends StatelessWidget {
   const _ReadingOverlay();
 
   @override
   Widget build(BuildContext context) {
     return ColoredBox(
-      color: const Color(0xF01D2433),
+      color: const Color(0xA61D2433),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,

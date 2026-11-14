@@ -204,17 +204,24 @@ void main() {
 
     bloc.add(const ScanShutterPressed());
     await Future<void>.delayed(const Duration(milliseconds: 15));
-    expect(bloc.state, const ScanScanning(ScanSource.camera));
+    expect(bloc.state, isA<ScanScanning>());
     expect(repository.reads, 0);
 
     await Future<void>.delayed(const Duration(milliseconds: 60));
     expect(states, <Object>[
       const ScanScanning(ScanSource.camera),
+      isA<ScanScanning>(),
       isA<ScanCaptured>(),
     ]);
     expect(repository.reads, 1);
     expect(repository.lastRead?.filename, 'shot.jpg');
     expect(camera.takes, 1);
+
+    // The lens is released as soon as the picture is in hand, and the captured
+    // frame is what the screen shows while the scanner reads it.
+    final ScanScanning framed = states[1] as ScanScanning;
+    expect(framed.photo?.filename, 'shot.jpg');
+    expect(camera.closes, 1);
 
     await sub.cancel();
     await bloc.close();
@@ -235,8 +242,9 @@ void main() {
     bloc.add(const ScanShutterPressed());
     await pumpEventQueue();
 
-    expect(states, <ScanState>[
+    expect(states, <Object>[
       const ScanScanning(ScanSource.camera),
+      isA<ScanScanning>(),
       const ScanFailure('That photo is too big.'),
     ]);
 
